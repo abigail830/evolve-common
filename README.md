@@ -15,7 +15,7 @@ A common backend service for document processing, AI agents, and more, built wit
 
 ## 🛠️ Tech Stack
 
-- **Backend**: Python 3.9+
+- **Backend**: Python 3.12
 - **Framework**: FastAPI
 - **Database**: PostgreSQL
 - **ORM & Migrations**: SQLAlchemy, Alembic
