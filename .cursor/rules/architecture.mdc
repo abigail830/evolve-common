@@ -1,0 +1,40 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Evolve Common Project Architecture
+
+This project is a Python-based backend service using FastAPI, designed for AI applications and deployment on Vercel. It follows a clean, layered architecture.
+
+## Key Files & Directories
+
+### Application Logic (lives in `[api/](mdc:api)`)
+
+The entire backend application code resides within the `api/` directory to comply with Vercel's conventions.
+
+-   **Entrypoint**: The main FastAPI application is defined in `[api/index.py](mdc:api/index.py)`. This is the entry point for Vercel.
+-   **API Endpoints**: REST API routes are defined in the `[api/endpoints/](mdc:api/endpoints)` directory. Each file typically represents a resource (e.g., documents, agents).
+-   **Services**: Business logic is separated into service classes within the `[api/services/](mdc:api/services)` directory. Endpoints should call services to perform actions.
+-   **Database Models**: SQLAlchemy models, which define the database table structures, should be placed in the `api/models/` directory (which we should create). All models must inherit from `Base` defined in `[api/db/base.py](mdc:api/db/base.py)`.
+-   **Pydantic Schemas**: Data validation and serialization models (for API request/response bodies) are located in `[api/schemas/](mdc:api/schemas)`.
+-   **Core Configuration**: Core application settings can be found in `[api/core/](mdc:api/core)`.
+-   **Database Setup**: The SQLAlchemy `Base` and future database session management logic is in `[api/db/](mdc:api/db)`.
+
+### Database Migrations (`[alembic/](mdc:alembic)`)
+
+-   The project uses **Alembic** for database migrations, configured in `[alembic.ini](mdc:alembic.ini)`.
+-   The environment setup, which connects to the database and finds models, is in `[alembic/env.py](mdc:alembic/env.py)`.
+-   Generated migration scripts are stored in `[alembic/versions/](mdc:alembic/versions)`.
+-   **To create a new migration**, run `poetry run alembic revision --autogenerate -m "description"`.
+-   **To apply migrations**, run `poetry run alembic upgrade head`.
+
+### Dependency Management
+
+-   Project dependencies are managed with Poetry in `[pyproject.toml](mdc:pyproject.toml)`.
+-   For Vercel deployment, a `[requirements.txt](mdc:requirements.txt)` file is generated from Poetry's lock file.
+-   **IMPORTANT**: After changing dependencies in `[pyproject.toml](mdc:pyproject.toml)`, you **must** regenerate `[requirements.txt](mdc:requirements.txt)` by running `poetry lock && poetry run pip freeze > requirements.txt`.
+
+### Deployment (`[vercel.json](mdc:vercel.json)`)
+
+-   Deployment to Vercel is configured in `[vercel.json](mdc:vercel.json)`. It specifies the Python runtime and routes all traffic to the FastAPI application at `[api/index.py](mdc:api/index.py)`.
