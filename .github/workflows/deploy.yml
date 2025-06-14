@@ -1,0 +1,41 @@
+name: Deploy to Tencent Cloud CVM
+
+on:
+  push:
+    branches:
+      - main  # 当代码推送到 main 分支时触发
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Deploy to CVM
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.CVM_HOST }}
+          username: ${{ secrets.CVM_USERNAME }}
+          key: ${{ secrets.CVM_SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            # 进入项目目录
+            cd /${{ secrets.CVM_USERNAME }}/evolve-common
+            
+            # 拉取最新代码
+            git pull origin main
+            
+            # 使用 Docker Compose 重启服务
+            # --build 会强制重新构建镜像
+            # -d 会在后台运行
+            docker-compose up --build -d
+            
+            # 等待几秒钟让 api 服务完全启动
+            sleep 5
+
+            # 运行数据库迁移
+            # 假设您的 docker-compose 服务名为 api
+            docker-compose exec api alembic upgrade head 

@@ -1,6 +1,6 @@
 # Evolve Common Service
 
-A common backend service for document processing, AI agents, and more, built with FastAPI and designed for Vercel deployment. This project serves as the core infrastructure for various AI-powered applications.
+A common backend service for document processing, AI agents, and more, built with FastAPI. This project serves as the core infrastructure for various AI-powered applications.
 
 ---
 
@@ -10,28 +10,108 @@ A common backend service for document processing, AI agents, and more, built wit
 - **AI Capabilities**: Extensible design for future embedding and reranking services.
 - **Agentic Workflows**: Utilizes `langgraph` to build complex, stateful AI agents.
 - **Modern API**: Asynchronous API built with FastAPI, with automatic Swagger/OpenAPI documentation.
+- **Containerized**: Comes with a Docker and Docker Compose setup for easy development and deployment.
 - **Database Migrations**: Uses Alembic for robust database schema versioning.
-- **Scalable Deployment**: Configured for serverless deployment on Vercel.
 
 ## 🛠️ Tech Stack
 
-- **Backend**: Python 3.12
+- **Backend**: Python 3.11
 - **Framework**: FastAPI
 - **Database**: PostgreSQL
 - **ORM & Migrations**: SQLAlchemy, Alembic
 - **AI/LLM Frameworks**: LangGraph, Docling, Langchain
 - **Dependency Management**: Poetry
-- **Deployment**: Vercel
+- **Containerization**: Docker, Docker Compose
 
-## 🚀 Getting Started
+## 🚀 Getting Started with Docker (Recommended)
 
-Follow these instructions to set up and run the project locally.
+This is the recommended way to run the project for both development and production.
 
 ### 1. Prerequisites
 
-- [Python](https://www.python.org/) (version 3.9 or higher)
+- [Docker](https://docs.docker.com/get-docker/)
+- [Docker Compose](https://docs.docker.com/compose/install/)
+
+### 2. Configure Environment Variables
+
+Create a `.env` file in the project root. You can copy the contents below as a template.
+
+```env
+# .env
+
+# PostgreSQL Settings for Docker Compose
+POSTGRES_USER=user
+POSTGRES_PASSWORD=password
+POSTGRES_DB=evolve
+POSTGRES_HOST=db
+POSTGRES_PORT=5432
+
+# DATABASE_URL for Alembic and FastAPI
+# This connects the application running in the 'api' service to the 'db' service.
+DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+
+# Application settings
+# Add any other application-specific environment variables here.
+```
+This file is listed in `.gitignore` and will not be committed to the repository.
+
+### 3. Build and Run the Containers
+
+Use Docker Compose to build the images and start the services.
+
+```bash
+docker compose up --build -d
+```
+The `-d` flag runs the containers in detached mode.
+
+The API service will be running and available at `http://127.0.0.1:8000`.
+
+### 4. Run Database Migrations
+
+After starting the containers, apply the database migrations.
+
+```bash
+docker compose exec api poetry run alembic upgrade head
+```
+
+## �� API Documentation
+
+Once the server is running, the interactive API documentation (Swagger UI) is automatically generated and can be accessed at:
+
+- **Swagger UI**: `http://127.0.0.1:8000/docs`
+- **ReDoc**: `http://127.0.0.1:8000/redoc`
+
+## 🗄️ Database Migrations with Docker
+
+When you make changes to the SQLAlchemy models in `api/models/`, you need to generate a new migration script.
+
+- **To create a new migration:**
+  ```bash
+  docker compose exec api poetry run alembic revision --autogenerate -m "Your descriptive message"
+  ```
+  This will generate a new script in the `alembic/versions/` directory.
+
+- **To apply migrations:**
+  ```bash
+  docker compose exec api poetry run alembic upgrade head
+  ```
+
+- **To downgrade a migration:**
+  ```bash
+  docker compose exec api poetry run alembic downgrade -1
+  ```
+
+---
+
+## 👨‍💻 Local Development without Docker
+
+If you prefer not to use Docker, you can run the project locally.
+
+### 1. Prerequisites
+
+- [Python](https://www.python.org/) (version 3.11 or higher)
 - [Poetry](https://python-poetry.org/docs/#installation) for dependency management.
-- A running PostgreSQL database instance.
+- A running PostgreSQL database instance (not in Docker).
 
 ### 2. Clone the Repository
 
@@ -42,56 +122,23 @@ cd evolve-common
 
 ### 3. Configure Environment Variables
 
-Create a `.env` file in the project root by copying the example file:
+Create a `.env` file and set the `DATABASE_URL` to point to your local PostgreSQL instance.
 
-```bash
-cp .env.example .env
-```
-**Note:** If `.env.example` does not exist, create `.env` manually.
-
-Open the `.env` file and set your database connection URL:
 ```env
 # .env
-DATABASE_URL="postgresql://user:password@host:port/dbname"
+DATABASE_URL="postgresql://user:password@localhost:5432/evolve"
 ```
-This file is listed in `.gitignore` and will not be committed to the repository.
 
-### 4. Install Dependencies
-
-Use Poetry to install the project's dependencies. This will create a virtual environment managed by Poetry.
+### 4. Install Dependencies & Run
 
 ```bash
 poetry install
-```
-
-### 5. Run Database Migrations
-
-Apply any existing database migrations to set up your database schema.
-
-```bash
 poetry run alembic upgrade head
-```
-
-### 6. Run the Development Server
-
-Start the FastAPI application using Uvicorn. The `--reload` flag will automatically restart the server when code changes are detected.
-
-```bash
 poetry run uvicorn api.index:app --reload --port 8000
 ```
-
-The application will be available at `http://127.0.0.1:8000`.
-
-## 📚 API Documentation
-
-Once the server is running, the interactive API documentation (Swagger UI) is automatically generated and can be accessed at:
-
-- **Swagger UI**: `http://127.0.0.1:8000/docs`
-- **ReDoc**: `http://127.0.0.1:8000/redoc`
+---
 
 ## 📂 Project Structure
-
-The project follows a structure optimized for FastAPI applications on Vercel:
 
 ```
 /
@@ -105,31 +152,10 @@ The project follows a structure optimized for FastAPI applications on Vercel:
 │   ├── services/         # Business logic services
 │   └── index.py          # FastAPI application entrypoint
 ├── tests/                # Application tests
-├── .env.example          # Example environment variables
 ├── .gitignore            # Git ignore file
 ├── alembic.ini           # Alembic configuration
+├── Dockerfile            # Dockerfile for the application
+├── docker-compose.yml    # Docker Compose configuration
 ├── pyproject.toml        # Project dependencies and metadata (Poetry)
-├── README.md             # This file
-└── vercel.json           # Vercel deployment configuration
+└── README.md             # This file
 ```
-
-## 🗄️ Database Migrations
-
-Alembic is used to handle database schema changes.
-
-- **To create a new migration:**
-  After changing a SQLAlchemy model in `api/models/`, run:
-  ```bash
-  poetry run alembic revision --autogenerate -m "A descriptive message for the migration"
-  ```
-  This will generate a new migration script in `alembic/versions/`.
-
-- **To apply migrations:**
-  ```bash
-  poetry run alembic upgrade head
-  ```
-
-- **To downgrade a migration:**
-  ```bash
-  poetry run alembic downgrade -1
-  ```
