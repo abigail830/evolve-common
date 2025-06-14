@@ -1,6 +1,6 @@
 services:
   api:
-    image: ${{TCR_REGISTRY:-your-registry-namespace}}/${{IMAGE_NAME:-evolve-common-api}}:${{IMAGE_TAG:-latest}}
+    image: ${TCR_REGISTRY:-your-registry-namespace}/${IMAGE_NAME:-evolve-common-api}:${IMAGE_TAG:-latest}
     ports:
       - "8000:8000"
     volumes:
