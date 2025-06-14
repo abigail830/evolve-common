@@ -60,7 +60,18 @@ This file is listed in `.gitignore` and will not be committed to the repository.
 Use Docker Compose to build the images and start the services.
 
 ```bash
+# 启动容器
 docker compose up --build -d
+# 停止并移除所有容器
+docker compose down
+# 仅停止容器
+docker compose stop
+# 日志查询
+docker-compose logs api
+# 进入 API 容器的 Python 交互式环境
+docker-compose exec api python
+# 更新后重启服务
+docker-compose restart api
 ```
 The `-d` flag runs the containers in detached mode.
 
@@ -87,21 +98,34 @@ When you make changes to the SQLAlchemy models in `api/models/`, you need to gen
 
 - **To create a new migration:**
   ```bash
+  <!-- ## To create a new migration -->
+  <!-- ### This will generate a new script in the `alembic/versions/` directory. -->
   docker compose exec api poetry run alembic revision --autogenerate -m "Your descriptive message"
-  ```
-  This will generate a new script in the `alembic/versions/` directory.
 
-- **To apply migrations:**
-  ```bash
+  <!-- ## To apply migrations -->
   docker compose exec api poetry run alembic upgrade head
-  ```
 
-- **To downgrade a migration:**
-  ```bash
+  <!-- ##To downgrade a migration -->
   docker compose exec api poetry run alembic downgrade -1
   ```
+```bash
+  # 进入 PostgreSQL 容器的交互式命令行
+docker-compose exec db psql -U user -d evolve
+```
 
----
+```sql
+-- 列出所有表
+\dt
+
+-- 查看 documents 表结构
+\d documents
+
+-- 查询 documents 表中的所有记录
+SELECT * FROM documents;
+
+-- 退出 psql
+\q
+```
 
 ## 👨‍💻 Local Development without Docker
 

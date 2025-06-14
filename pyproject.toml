@@ -22,6 +22,8 @@ langchain-openai = "^0.1.8"
 langchain-anthropic = "^0.1.15"
 # For potential OSS file storage
 boto3 = "^1.34.111"
+python-multipart = "^0.0.9"
+aiofiles = "^23.2.1"
 
 
 [tool.poetry.group.dev.dependencies]
