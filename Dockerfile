@@ -16,8 +16,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # 复制依赖文件
 COPY poetry.lock pyproject.toml ./
 
-# 导出依赖到 requirements.txt
-RUN poetry export --without-hashes -f requirements.txt > requirements.txt
+# 导出依赖到 requirements.txt (使用更可靠的方式)
+RUN poetry config virtualenvs.create false && \
+    poetry install --no-interaction --no-ansi --no-root --without dev && \
+    poetry export --without-hashes > requirements.txt || pip freeze > requirements.txt
 
 # 最终阶段
 FROM python:3.11-slim

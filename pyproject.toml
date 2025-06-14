@@ -15,8 +15,8 @@ sqlalchemy = "^2.0.30"
 alembic = "^1.13.1"
 psycopg2-binary = "^2.9.9"
 docling = "^2.36.1"
-# 只保留 HTMLHeaderTextSplitter 所需的最小依赖
-langchain-text-splitters = "^0.0.1"  # 只引入文本分割器
+# 使用完整的 langchain 但减少其他依赖
+langchain = "^0.2.5"  # 包含 HTMLHeaderTextSplitter
 beautifulsoup4 = "^4.12.3"  # HTML 解析器
 python-multipart = "^0.0.9"  # 处理文件上传
 aiofiles = "^23.2.1"  # 异步文件操作

@@ -55,6 +55,10 @@ jobs:
           build-args: |
             BUILDKIT_INLINE_CACHE=1
           outputs: type=registry,compression=gzip
+          # 添加更多调试信息
+          provenance: false
+          no-cache: ${{ github.event_name == 'workflow_dispatch' }}
+          pull: true
 
       # 更新缓存
       - name: Move cache
