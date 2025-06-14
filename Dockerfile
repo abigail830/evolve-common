@@ -1,31 +1,53 @@
-FROM python:3.11-slim
+# 构建阶段
+FROM python:3.11-slim AS builder
 
-# Set environment variables
+# 设置环境变量
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-# Add poetry to path
 ENV PATH="/root/.local/bin:${PATH}"
 
-# Set work directory
+# 设置工作目录
 WORKDIR /app
 
-# Install poetry
+# 安装 poetry
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir poetry
 
-# Install dependencies using poetry (or requirements.txt)
-# Copy only files needed for dependency installation to leverage caching
+# 复制依赖文件
 COPY poetry.lock pyproject.toml ./
-RUN poetry config virtualenvs.create false && \
-    poetry install --no-root --without dev
 
-# Copy project code
+# 导出依赖到 requirements.txt
+RUN poetry export --without-hashes -f requirements.txt > requirements.txt
+
+# 最终阶段
+FROM python:3.11-slim
+
+# 设置环境变量
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# 设置工作目录
+WORKDIR /app
+
+# 从构建阶段复制 requirements.txt
+COPY --from=builder /app/requirements.txt .
+
+# 安装依赖
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    rm -rf /root/.cache/pip
+
+# 复制应用代码
 COPY ./api ./api
 COPY ./alembic ./alembic
 COPY alembic.ini .
 
-# Expose port
+# 创建存储目录
+RUN mkdir -p /app/storage/uploads && \
+    chmod -R 777 /app/storage
+
+# 暴露端口
 EXPOSE 8000
 
-# Run the application
+# 运行应用
 CMD ["uvicorn", "api.index:app", "--host", "0.0.0.0", "--port", "8000"] 

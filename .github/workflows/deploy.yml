@@ -14,6 +14,7 @@ jobs:
   build-and-push:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
+    timeout-minutes: 30  # 增加超时时间
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -28,6 +29,15 @@ jobs:
           username: ${{ secrets.TCR_USERNAME }}
           password: ${{ secrets.TCR_PASSWORD }}
 
+      # 添加缓存步骤
+      - name: Set up Docker layer caching
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
       - name: Build and push Docker image
         id: build-and-push
         uses: docker/build-push-action@v5
@@ -35,13 +45,28 @@ jobs:
           context: .
           push: true
           tags: ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=local,src=/tmp/.buildx-cache
+            type=gha
+          cache-to: |
+            type=local,dest=/tmp/.buildx-cache-new,mode=max
+            type=gha,mode=max
+          # 添加构建参数以提高可见性
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+          outputs: type=registry,compression=gzip
+
+      # 更新缓存
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
   deploy:
     name: Deploy to CVM
     needs: build-and-push # This job runs only after the build is successful
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # 增加超时时间
     steps:
       - name: Deploy to CVM
         uses: appleboy/ssh-action@master
@@ -78,8 +103,29 @@ jobs:
             docker-compose pull api
             docker-compose up -d --remove-orphans
 
-            # Wait for the service to be healthy
-            sleep 20
+            # 使用健康检查替代固定等待时间
+            echo "Waiting for API service to be healthy..."
+            timeout=60
+            while [ $timeout -gt 0 ]; do
+              if docker-compose exec -T api curl -s http://localhost:8000/ > /dev/null; then
+                echo "API service is healthy!"
+                break
+              fi
+              echo "Waiting for API to be ready... ($timeout seconds left)"
+              sleep 5
+              timeout=$((timeout-5))
+            done
             
-            # Run database migrations
-            docker-compose exec api alembic upgrade head 
+            if [ $timeout -le 0 ]; then
+              echo "Warning: API service did not become healthy within timeout"
+              # 继续执行，因为有些服务可能不提供健康检查端点
+            fi
+            
+            # 运行数据库迁移，添加错误处理
+            echo "Running database migrations..."
+            if ! docker-compose exec -T api alembic upgrade head; then
+              echo "Error: Database migration failed!"
+              exit 1
+            fi
+            
+            echo "Deployment completed successfully!" 

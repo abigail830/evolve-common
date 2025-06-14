@@ -1,6 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 # from .endpoints import documents, agents
 from api.endpoints import documents
+from sqlalchemy.orm import Session
+from api.db.session import get_db
 
 app = FastAPI(
     title="Evolve Common Service",
@@ -12,6 +14,26 @@ app = FastAPI(
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Evolve Common Service API"}
+
+@app.get("/health")
+def health_check(db: Session = Depends(get_db)):
+    """
+    健康检查端点，验证服务和数据库连接状态
+    """
+    try:
+        # 执行简单查询验证数据库连接
+        db.execute("SELECT 1")
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "service": "running"
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "database": str(e),
+            "service": "running"
+        }
 
 # Include routers from endpoints
 app.include_router(documents.router, prefix="/documents", tags=["Documents"])
