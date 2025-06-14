@@ -9,6 +9,7 @@ on:
 env:
   TCR_REGISTRY: ${{ secrets.TCR_REGISTRY }}
   IMAGE_NAME: evolve-common-api
+  API_URL: ${{ secrets.API_URL || 'http://localhost:8000' }}  # API 基础 URL
 
 jobs:
   build-and-push:
@@ -21,6 +22,13 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Extract version from pyproject.toml
+        id: get_version
+        run: |
+          VERSION=$(grep "^version" pyproject.toml | cut -d'"' -f2)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Extracted version: $VERSION"
 
       - name: Log in to Tencent Container Registry
         uses: docker/login-action@v3
@@ -44,7 +52,10 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          tags: |
+            ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}
+            ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-from: |
             type=local,src=/tmp/.buildx-cache
             type=gha
@@ -54,6 +65,7 @@ jobs:
           # 添加构建参数以提高可见性
           build-args: |
             BUILDKIT_INLINE_CACHE=1
+            VERSION=${{ env.VERSION }}
           outputs: type=registry,compression=gzip
           # 添加更多调试信息
           provenance: false
@@ -70,7 +82,7 @@ jobs:
     name: Deploy to CVM
     needs: build-and-push # This job runs only after the build is successful
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # 增加超时时间
+    timeout-minutes: 20  # 增加整体超时时间
     steps:
       - name: Deploy to CVM
         uses: appleboy/ssh-action@master
@@ -78,15 +90,34 @@ jobs:
           host: ${{ secrets.CVM_HOST }}
           username: ${{ secrets.CVM_USERNAME }}
           key: ${{ secrets.CVM_SSH_PRIVATE_KEY }}
+          command_timeout: 20m  # 增加命令超时时间
           script: |
             set -e
             cd /${{ secrets.CVM_USERNAME }}/evolve-common
 
-            # Configure Git to use HTTP/1.1 for stability
-            git config --global http.version HTTP/1.1
+            # 增强 Git 操作的可靠性
+            export GIT_CURL_VERBOSE=1
+            export GIT_TRACE=1
             
-            # Pull the latest docker-compose.yml if it has changed
-            git pull origin main
+            # 配置 Git 使用 HTTP/1.1 和更长的超时时间
+            git config --global http.version HTTP/1.1
+            git config --global http.postBuffer 524288000
+            git config --global http.lowSpeedLimit 1000
+            git config --global http.lowSpeedTime 60
+            
+            # 尝试拉取最新代码，如果失败则跳过
+            echo "Pulling latest code from GitHub..."
+            git fetch origin main || echo "Warning: Failed to fetch from GitHub, continuing with existing code"
+            git reset --hard origin/main || echo "Warning: Failed to reset to origin/main, continuing with existing code"
+            
+            # 从本地文件获取版本信息，不依赖于 GitHub
+            if [ -f pyproject.toml ]; then
+              export VERSION=$(grep "^version" pyproject.toml | cut -d'"' -f2)
+              echo "Found version in local pyproject.toml: $VERSION"
+            else
+              export VERSION="latest"
+              echo "Warning: pyproject.toml not found, using 'latest' as version"
+            fi
 
             # Verify that the required secrets are set
             if [ -z "${{ secrets.TCR_REGISTRY }}" ] || [ -z "${{ secrets.TCR_USERNAME }}" ] || [ -z "${{ secrets.TCR_PASSWORD }}" ]; then
@@ -101,7 +132,7 @@ jobs:
             # Export environment variables for docker-compose to use
             export TCR_REGISTRY=${{ secrets.TCR_REGISTRY }}
             export IMAGE_NAME=${{ env.IMAGE_NAME }}
-            export IMAGE_TAG=${{ github.sha }}
+            export IMAGE_TAG=$VERSION  # 使用语义化版本号而不是 SHA
 
             # Pull the new image and restart services using docker-compose
             docker-compose pull api
@@ -132,4 +163,30 @@ jobs:
               exit 1
             fi
             
-            echo "Deployment completed successfully!" 
+            echo "Deployment completed successfully! Version: $VERSION"
+      
+      # 添加一个等待步骤，确保服务有足够时间启动
+      - name: Wait for service to start
+        run: sleep 15
+      
+      # 检查服务健康状态
+      - name: Check service health
+        id: health_check
+        uses: fjogeleit/http-request-action@v1
+        with:
+          url: ${{ env.API_URL }}/health
+          method: 'GET'
+          timeout: 10000
+      
+      # 显示健康检查结果
+      - name: Display health check result
+        run: |
+          echo "Health check status: ${{ fromJson(steps.health_check.outputs.response).status }}"
+          echo "Database status: ${{ fromJson(steps.health_check.outputs.response).database }}"
+          echo "Service version: ${{ fromJson(steps.health_check.outputs.response).version }}"
+          
+          # 验证服务是否健康
+          if [ "${{ fromJson(steps.health_check.outputs.response).status }}" != "healthy" ]; then
+            echo "::warning::Service health check returned non-healthy status: ${{ fromJson(steps.health_check.outputs.response).status }}"
+          else
+            echo "::notice::Service is healthy and running version ${{ fromJson(steps.health_check.outputs.response).version }}" 

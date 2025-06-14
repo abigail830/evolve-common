@@ -24,9 +24,13 @@ RUN poetry config virtualenvs.create false && \
 # 最终阶段
 FROM python:3.11-slim
 
+# 接收版本参数
+ARG VERSION=unknown
+
 # 设置环境变量
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV APP_VERSION=${VERSION}
 
 # 设置工作目录
 WORKDIR /app
@@ -47,6 +51,11 @@ COPY alembic.ini .
 # 创建存储目录
 RUN mkdir -p /app/storage/uploads && \
     chmod -R 777 /app/storage
+
+# 添加版本标签
+LABEL version="${VERSION}" \
+      maintainer="Evolve Team" \
+      description="Evolve Common API Service"
 
 # 暴露端口
 EXPOSE 8000

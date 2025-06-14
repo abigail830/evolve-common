@@ -3,17 +3,24 @@ from fastapi import FastAPI, Depends
 from api.endpoints import documents
 from sqlalchemy.orm import Session
 from api.db.session import get_db
+import os
+
+# 获取版本信息
+VERSION = os.environ.get("APP_VERSION", "0.1.0")
 
 app = FastAPI(
     title="Evolve Common Service",
-    description="A common service for document processing, AI agents, and more.",
-    version="0.1.0",
+    description="A common backend service for document processing, AI agents, and more.",
+    version=VERSION,
 )
 
 # Health check endpoint
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to the Evolve Common Service API"}
+    return {
+        "message": "Welcome to the Evolve Common Service API",
+        "version": VERSION,
+    }
 
 @app.get("/health")
 def health_check(db: Session = Depends(get_db)):
@@ -26,13 +33,15 @@ def health_check(db: Session = Depends(get_db)):
         return {
             "status": "healthy",
             "database": "connected",
-            "service": "running"
+            "service": "running",
+            "version": VERSION,
         }
     except Exception as e:
         return {
             "status": "unhealthy",
             "database": str(e),
-            "service": "running"
+            "service": "running",
+            "version": VERSION,
         }
 
 # Include routers from endpoints
