@@ -31,6 +31,7 @@ ARG VERSION=unknown
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV APP_VERSION=${VERSION}
+ENV PATH="/usr/local/bin:${PATH}"
 
 # 设置工作目录
 WORKDIR /app
@@ -41,6 +42,11 @@ COPY --from=builder /app/requirements.txt .
 # 安装依赖
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
+    # 确保 uvicorn 被正确安装
+    pip install --no-cache-dir uvicorn[standard] && \
+    # 验证 uvicorn 是否可用
+    which uvicorn && \
+    # 清理缓存
     rm -rf /root/.cache/pip
 
 # 复制应用代码
@@ -60,5 +66,5 @@ LABEL version="${VERSION}" \
 # 暴露端口
 EXPOSE 8000
 
-# 运行应用
-CMD ["uvicorn", "api.index:app", "--host", "0.0.0.0", "--port", "8000"] 
+# 运行应用 - 使用完整路径
+CMD ["python", "-m", "uvicorn", "api.index:app", "--host", "0.0.0.0", "--port", "8000"] 

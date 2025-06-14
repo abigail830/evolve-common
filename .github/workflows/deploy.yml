@@ -10,6 +10,7 @@ env:
   TCR_REGISTRY: ${{ secrets.TCR_REGISTRY }}
   IMAGE_NAME: evolve-common-api
   API_URL: ${{ secrets.API_URL || 'http://localhost:8000' }}  # API 基础 URL
+  GITHUB_REPO_SSH: git@github.com:abigail830/evolve-common.git  # 使用 SSH 方式
 
 jobs:
   build-and-push:
@@ -84,6 +85,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20  # 增加整体超时时间
     steps:
+      # 使用独立的 SSH 密钥用于 GitHub
+      - name: Set up SSH keys for GitHub
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.GIT_SSH_PRIVATE_KEY }}
+      
+      # 添加 GitHub 到已知主机
+      - name: Add GitHub to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -t rsa github.com >> ~/.ssh/known_hosts
+      
       - name: Deploy to CVM
         uses: appleboy/ssh-action@master
         with:
@@ -94,21 +107,38 @@ jobs:
           script: |
             set -e
             cd /${{ secrets.CVM_USERNAME }}/evolve-common
-
+            
+            # 使用独立的 GitHub SSH 密钥
+            # 确保 SSH 代理正在运行
+            eval "$(ssh-agent -s)"
+            
+            # 将 GitHub SSH 密钥添加到 SSH 代理
+            echo "${{ secrets.GIT_SSH_PRIVATE_KEY }}" > ~/.ssh/git_key
+            chmod 600 ~/.ssh/git_key
+            ssh-add ~/.ssh/git_key
+            
             # 增强 Git 操作的可靠性
             export GIT_CURL_VERBOSE=1
             export GIT_TRACE=1
+            export GIT_SSH_COMMAND="ssh -v -i ~/.ssh/git_key"
             
-            # 配置 Git 使用 HTTP/1.1 和更长的超时时间
-            git config --global http.version HTTP/1.1
-            git config --global http.postBuffer 524288000
-            git config --global http.lowSpeedLimit 1000
-            git config --global http.lowSpeedTime 60
+            # 检查当前远程仓库 URL
+            CURRENT_REMOTE=$(git remote -v | grep origin | head -n 1 | awk '{print $2}')
+            echo "Current remote: $CURRENT_REMOTE"
             
-            # 尝试拉取最新代码，如果失败则跳过
-            echo "Pulling latest code from GitHub..."
+            # 如果不是 SSH URL，则更改为 SSH
+            if [[ $CURRENT_REMOTE != git@github.com:* ]]; then
+              echo "Changing remote URL to SSH..."
+              git remote set-url origin ${{ env.GITHUB_REPO_SSH }}
+            fi
+            
+            # 尝试拉取最新代码，使用 SSH 方式
+            echo "Pulling latest code from GitHub using SSH..."
             git fetch origin main || echo "Warning: Failed to fetch from GitHub, continuing with existing code"
             git reset --hard origin/main || echo "Warning: Failed to reset to origin/main, continuing with existing code"
+            
+            # 清理临时密钥文件
+            rm -f ~/.ssh/git_key
             
             # 从本地文件获取版本信息，不依赖于 GitHub
             if [ -f pyproject.toml ]; then
@@ -136,8 +166,24 @@ jobs:
 
             # Pull the new image and restart services using docker-compose
             docker-compose pull api
+            
+            # 显示容器镜像信息
+            echo "Available images:"
+            docker images | grep ${IMAGE_NAME}
+            
+            # 停止并移除旧容器
+            docker-compose down || true
+            
+            # 启动新容器
             docker-compose up -d --remove-orphans
-
+            
+            # 检查容器状态
+            docker-compose ps
+            
+            # 查看容器日志
+            echo "API container logs:"
+            docker-compose logs api
+            
             # 使用健康检查替代固定等待时间
             echo "Waiting for API service to be healthy..."
             timeout=60
@@ -147,12 +193,20 @@ jobs:
                 break
               fi
               echo "Waiting for API to be ready... ($timeout seconds left)"
+              # 检查容器是否还在运行
+              if ! docker-compose ps | grep api | grep -q "Up"; then
+                echo "ERROR: API container is not running! Container logs:"
+                docker-compose logs api
+                exit 1
+              fi
               sleep 5
               timeout=$((timeout-5))
             done
             
             if [ $timeout -le 0 ]; then
               echo "Warning: API service did not become healthy within timeout"
+              echo "Container logs:"
+              docker-compose logs api
               # 继续执行，因为有些服务可能不提供健康检查端点
             fi
             
