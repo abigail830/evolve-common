@@ -119,29 +119,48 @@ async def delete_document(
     response_model=schemas.processed_document.ProcessedDocument,
     status_code=201,
     summary="Process a document and convert to HTML",
-    description="Process an existing document using docling to convert it to HTML format with preserved images.",
+    description="Process an existing document using mammoth for DOCX files or docling for other formats to convert to HTML format with preserved images.",
 )
 def process_document_to_html(
     *,
     document_id: int = Path(..., description="The ID of the document to process."),
+    output_format: str = Query("html", description="The desired output format. Currently only 'html' is supported."),
     db: Session = Depends(get_db),
 ):
     """
-    处理指定ID的文档，使用docling将其转换为HTML格式，并保留所有图片资源。
-    转换后的HTML文件及其资源将被保存到处理目录中。
+    处理指定ID的文档，根据文件类型选择合适的处理方法将其转换为HTML格式：
+    - 对于DOCX文档：使用Mammoth转换为HTML并提取图片
+    - 对于其他格式：使用原有的docling转换服务
+    
+    转换后的文件及其资源将被保存到处理目录中。
 
     - **document_id**: 要处理的文档ID.
+    - **output_format**: 输出格式，目前只支持"html".
     """
     # 1. 从数据库获取文档
     document = document_service.get_document(db, document_id=document_id)
     if not document:
         raise HTTPException(status_code=404, detail=f"Document with ID {document_id} not found")
+    
+    # 检查请求的输出格式
+    if output_format.lower() != "html":
+        raise HTTPException(status_code=400, detail="Currently only HTML output format is supported")
 
-    # 2. 使用处理服务处理文档
+    # 2. 根据文档格式选择合适的处理服务处理文档
     try:
-        html_output_path, resources_path = document_processing_service.convert_file(document.filepath)
+        if document.filepath.lower().endswith('.docx'):
+            # 对于DOCX文档使用Mammoth服务
+            html_output_path, resources_path = docx_to_html_converter.convert_file(document.filepath)
+            print(f"使用Mammoth转换DOCX文档: {document.filepath}")
+        else:
+            # 对于其他格式使用原有的处理服务
+            html_output_path, resources_path = document_processing_service.convert_file(document.filepath)
+            print(f"使用原始服务转换非DOCX文档: {document.filepath}")
+            
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         # 捕获可能的错误，提供详细信息以便调试
         error_message = f"Failed to process document: {str(e)}"
@@ -155,7 +174,7 @@ def process_document_to_html(
         original_document_id=document_id,
         file_path=html_output_path,
         resources_path=resources_path,
-        format="html",
+        format=output_format.lower(),
     )
 
     db_processed_document = document_service.create_processed_document(
@@ -220,59 +239,3 @@ async def delete_processed_document(
     
     # 204 No Content 响应不需要返回内容
     return None
-
-@router.post(
-    "/{document_id}/process-docx",
-    response_model=schemas.processed_document.ProcessedDocument,
-    status_code=201,
-    summary="Process a DOCX document and convert to HTML",
-    description="Process an existing DOCX document using Mammoth to convert it to HTML format with preserved images.",
-)
-def process_docx_to_html(
-    *,
-    document_id: int = Path(..., description="The ID of the document to process."),
-    db: Session = Depends(get_db),
-):
-    """
-    处理指定ID的DOCX文档，使用Mammoth将其转换为HTML格式，并提取所有图片资源。
-    转换后的HTML文件及其资源将被保存到处理目录中。
-
-    - **document_id**: 要处理的文档ID
-    """
-    # 1. 从数据库获取文档
-    document = document_service.get_document(db, document_id=document_id)
-    if not document:
-        raise HTTPException(status_code=404, detail=f"Document with ID {document_id} not found")
-    
-    # 检查文件格式是否为DOCX
-    if not document.filepath.lower().endswith('.docx'):
-        raise HTTPException(status_code=400, detail="Only DOCX format is supported for this endpoint")
-
-    # 2. 使用Mammoth处理服务处理文档
-    try:
-        html_output_path, resources_path = docx_to_html_converter.convert_file(document.filepath)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        # 捕获可能的错误，提供详细信息以便调试
-        error_message = f"Failed to process document: {str(e)}"
-        print(f"ERROR - {error_message}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=error_message)
-
-    # 3. 为处理后的文档创建数据库记录
-    processed_doc_in = schemas.processed_document.ProcessedDocumentCreate(
-        original_document_id=document_id,
-        file_path=html_output_path,
-        resources_path=resources_path,
-        format="html",
-    )
-
-    db_processed_document = document_service.create_processed_document(
-        db=db, processed_document_in=processed_doc_in
-    )
-
-    return db_processed_document 
