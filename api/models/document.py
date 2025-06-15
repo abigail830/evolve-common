@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, func
+from sqlalchemy.orm import relationship
 from api.db.base import Base
 
 
@@ -10,4 +11,6 @@ class Document(Base):
     filepath = Column(String, nullable=False, unique=True)
     filesize = Column(Integer, nullable=False)
     created_by = Column(String, nullable=True)  # Simple user tracking
-    created_at = Column(DateTime(timezone=True), server_default=func.now()) 
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    processed_documents = relationship("ProcessedDocument", back_populates="original_document", cascade="all, delete-orphan") 

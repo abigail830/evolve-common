@@ -4,6 +4,10 @@ from api.endpoints import documents
 from sqlalchemy.orm import Session
 from api.db.session import get_db
 import os
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
 
 # 获取版本信息
 VERSION = os.environ.get("APP_VERSION", "0.1.0")

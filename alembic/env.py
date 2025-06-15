@@ -13,6 +13,7 @@ from alembic import context
 
 from api.db.base import Base
 from api.models.document import Document  # noqa
+from api.models.processed_document import ProcessedDocument  # noqa
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

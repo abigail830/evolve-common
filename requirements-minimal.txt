@@ -1,0 +1,13 @@
+python
+fastapi
+uvicorn
+python-dotenv
+pydantic
+pydantic-settings
+sqlalchemy
+alembic
+psycopg2-binary
+python-multipart
+aiofiles
+docling
+docling-core

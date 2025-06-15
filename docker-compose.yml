@@ -1,6 +1,7 @@
 services:
   api:
-    image: ${TCR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG:-latest}
+    build: .
+    image: evolve-common-api:local
     ports:
       - "8000:8000"
     volumes:

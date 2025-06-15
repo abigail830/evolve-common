@@ -85,7 +85,7 @@ After starting the containers, apply the database migrations.
 docker compose exec api poetry run alembic upgrade head
 ```
 
-## �� API Documentation
+## 📄 API Documentation
 
 Once the server is running, the interactive API documentation (Swagger UI) is automatically generated and can be accessed at:
 
@@ -131,35 +131,81 @@ SELECT * FROM documents;
 
 If you prefer not to use Docker, you can run the project locally.
 
-### 1. Prerequisites
-
-- [Python](https://www.python.org/) (version 3.11 or higher)
-- [Poetry](https://python-poetry.org/docs/#installation) for dependency management.
-- A running PostgreSQL database instance (not in Docker).
-
-### 2. Clone the Repository
-
-```bash
-git clone <your-repository-url>
-cd evolve-common
-```
-
-### 3. Configure Environment Variables
-
-Create a `.env` file and set the `DATABASE_URL` to point to your local PostgreSQL instance.
-
-```env
-# .env
-DATABASE_URL="postgresql://user:password@localhost:5432/evolve"
-```
-
-### 4. Install Dependencies & Run
+### Install Dependencies & Run
 
 ```bash
 poetry install
 poetry run alembic upgrade head
 poetry run uvicorn api.index:app --reload --port 8000
 ```
+
+## 依赖管理
+
+本项目使用 `pyproject.toml` 作为主要依赖管理文件，并使用 `uv` 作为包管理工具。
+
+### 安装 uv
+
+```bash
+brew install uv
+```
+
+### 设置开发环境
+
+```bash
+make setup
+```
+
+这将创建一个虚拟环境并安装所有依赖。
+
+### 生成 requirements.txt
+
+```bash
+make requirements
+```
+
+这将从 `pyproject.toml` 生成 `requirements.txt` 和 `requirements-minimal.txt` 文件，用于 Docker 构建和其他需要 requirements.txt 的场景。
+
+## 本地开发
+
+### 启动数据库
+
+```bash
+make docker-db
+```
+
+这将启动一个 PostgreSQL 数据库容器。
+
+### 运行数据库迁移
+
+```bash
+make migrate
+```
+
+### 启动开发服务器
+
+```bash
+make dev
+```
+
+## Docker 部署
+
+### 构建和运行 Docker 容器
+
+```bash
+# 首先生成 requirements.txt
+make requirements
+
+# 然后构建并启动容器
+docker-compose up -d --build
+```
+
+## API 文档
+
+启动服务后，可以访问以下 URL 查看 API 文档：
+
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
+
 ---
 
 ## 📂 Project Structure
