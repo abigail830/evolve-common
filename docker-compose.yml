@@ -1,21 +1,23 @@
 services:
   api:
-    build: .
-    image: evolve-common-api:local
+    # 在生产环境使用TCR镜像
+    image: ${TCR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG:-latest}
     ports:
       - "8000:8000"
     volumes:
-      - ./api:/app/api
-      - ./alembic:/app/alembic
-      - ./alembic.ini:/app/alembic.ini
       - ./storage:/app/storage
     env_file:
       - .env
     depends_on:
       db:
         condition: service_healthy
-    command: python -m uvicorn api.index:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn api.index:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   db:
     image: postgres:15-alpine

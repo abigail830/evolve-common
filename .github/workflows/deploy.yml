@@ -1,45 +1,44 @@
-name: Build and Deploy to Tencent Cloud CVM
+name: 构建并部署到腾讯云
 
 on:
   push:
     branches:
       - main
 
-# Define environment variables used across jobs
+# 定义环境变量
 env:
   TCR_REGISTRY: ${{ secrets.TCR_REGISTRY }}
   IMAGE_NAME: evolve-common-api
-  API_URL: ${{ secrets.API_URL || 'http://localhost:8000' }}  # API 基础 URL
-  GITHUB_REPO_SSH: git@github.com:abigail830/evolve-common.git  # 使用 SSH 方式
+  API_URL: ${{ secrets.API_URL || 'http://localhost:8000' }}
 
 jobs:
   build-and-push:
-    name: Build and Push Docker Image
+    name: 构建并推送镜像
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # 增加超时时间
+    timeout-minutes: 30
     steps:
-      - name: Checkout code
+      - name: 检出代码
         uses: actions/checkout@v3
 
-      - name: Set up Docker Buildx
+      - name: 设置 Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Extract version from pyproject.toml
+      - name: 提取版本号
         id: get_version
         run: |
           VERSION=$(grep "^version" pyproject.toml | cut -d'"' -f2)
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Extracted version: $VERSION"
+          echo "提取的版本号: $VERSION"
 
-      - name: Log in to Tencent Container Registry
+      - name: 登录腾讯容器镜像服务
         uses: docker/login-action@v3
         with:
           registry: ${{ env.TCR_REGISTRY }}
           username: ${{ secrets.TCR_USERNAME }}
           password: ${{ secrets.TCR_PASSWORD }}
 
-      # 添加缓存步骤
-      - name: Set up Docker layer caching
+      # 使用GitHub Actions的缓存机制
+      - name: 设置Docker构建缓存
         uses: actions/cache@v3
         with:
           path: /tmp/.buildx-cache
@@ -47,7 +46,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-
 
-      - name: Build and push Docker image
+      - name: 构建并推送Docker镜像
         id: build-and-push
         uses: docker/build-push-action@v5
         with:
@@ -57,145 +56,85 @@ jobs:
             ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
             ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}
             ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          cache-from: |
-            type=local,src=/tmp/.buildx-cache
-            type=gha
-          cache-to: |
-            type=local,dest=/tmp/.buildx-cache-new,mode=max
-            type=gha,mode=max
-          # 添加构建参数以提高可见性
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
           build-args: |
             BUILDKIT_INLINE_CACHE=1
             VERSION=${{ env.VERSION }}
-          outputs: type=registry,compression=gzip
-          # 添加更多调试信息
-          provenance: false
-          no-cache: ${{ github.event_name == 'workflow_dispatch' }}
-          pull: true
 
       # 更新缓存
-      - name: Move cache
+      - name: 移动缓存
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
   deploy:
-    name: Deploy to CVM
-    needs: build-and-push # This job runs only after the build is successful
+    name: 部署到腾讯云服务器
+    needs: build-and-push
     runs-on: ubuntu-latest
-    timeout-minutes: 20  # 增加整体超时时间
+    timeout-minutes: 20
     steps:
-      # 使用独立的 SSH 密钥用于 GitHub
-      - name: Set up SSH keys for GitHub
-        uses: webfactory/ssh-agent@v0.8.0
-        with:
-          ssh-private-key: ${{ secrets.GIT_SSH_PRIVATE_KEY }}
-      
-      # 添加 GitHub 到已知主机
-      - name: Add GitHub to known hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -t rsa github.com >> ~/.ssh/known_hosts
-      
-      - name: Deploy to CVM
+      - name: 部署到腾讯云服务器
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.CVM_HOST }}
           username: ${{ secrets.CVM_USERNAME }}
           key: ${{ secrets.CVM_SSH_PRIVATE_KEY }}
-          command_timeout: 20m  # 增加命令超时时间
+          command_timeout: 20m
           script: |
             set -e
-            cd /${{ secrets.CVM_USERNAME }}/evolve-common
+            cd ~/${{ secrets.CVM_USERNAME }}/evolve-common
             
-            # 使用独立的 GitHub SSH 密钥
-            # 确保 SSH 代理正在运行
-            eval "$(ssh-agent -s)"
-            
-            # 将 GitHub SSH 密钥添加到 SSH 代理
-            echo "${{ secrets.GIT_SSH_PRIVATE_KEY }}" > ~/.ssh/git_key
-            chmod 600 ~/.ssh/git_key
-            ssh-add ~/.ssh/git_key
-            
-            # 增强 Git 操作的可靠性
-            export GIT_CURL_VERBOSE=1
-            export GIT_TRACE=1
-            export GIT_SSH_COMMAND="ssh -v -i ~/.ssh/git_key"
-            
-            # 检查当前远程仓库 URL
-            CURRENT_REMOTE=$(git remote -v | grep origin | head -n 1 | awk '{print $2}')
-            echo "Current remote: $CURRENT_REMOTE"
-            
-            # 如果不是 SSH URL，则更改为 SSH
-            if [[ $CURRENT_REMOTE != git@github.com:* ]]; then
-              echo "Changing remote URL to SSH..."
-              git remote set-url origin ${{ env.GITHUB_REPO_SSH }}
-            fi
-            
-            # 尝试拉取最新代码，使用 SSH 方式
-            echo "Pulling latest code from GitHub using SSH..."
-            git fetch origin main || echo "Warning: Failed to fetch from GitHub, continuing with existing code"
-            git reset --hard origin/main || echo "Warning: Failed to reset to origin/main, continuing with existing code"
-            
-            # 清理临时密钥文件
-            rm -f ~/.ssh/git_key
-            
-            # 从本地文件获取版本信息，不依赖于 GitHub
-            if [ -f pyproject.toml ]; then
-              export VERSION=$(grep "^version" pyproject.toml | cut -d'"' -f2)
-              echo "Found version in local pyproject.toml: $VERSION"
-            else
-              export VERSION="latest"
-              echo "Warning: pyproject.toml not found, using 'latest' as version"
-            fi
-
-            # Verify that the required secrets are set
+            # 确保必要的环境变量存在
             if [ -z "${{ secrets.TCR_REGISTRY }}" ] || [ -z "${{ secrets.TCR_USERNAME }}" ] || [ -z "${{ secrets.TCR_PASSWORD }}" ]; then
-              echo "Error: One or more TCR secrets (TCR_REGISTRY, TCR_USERNAME, TCR_PASSWORD) are not set."
-              echo "Please add them to your GitHub repository secrets before proceeding."
+              echo "错误: 缺少容器镜像服务相关密钥"
               exit 1
             fi
-
-            # Log in to Tencent Container Registry on the CVM
+            
+            # 登录容器镜像服务
             echo "${{ secrets.TCR_PASSWORD }}" | docker login ${{ secrets.TCR_REGISTRY }} -u ${{ secrets.TCR_USERNAME }} --password-stdin
             
-            # Export environment variables for docker-compose to use
+            # 从本地文件获取版本信息
+            if [ -f pyproject.toml ]; then
+              export VERSION=$(grep "^version" pyproject.toml | cut -d'"' -f2)
+              echo "本地pyproject.toml中的版本: $VERSION"
+            else
+              export VERSION="latest"
+              echo "警告: 未找到pyproject.toml，使用'latest'作为版本"
+            fi
+            
+            # 设置环境变量
             export TCR_REGISTRY=${{ secrets.TCR_REGISTRY }}
             export IMAGE_NAME=${{ env.IMAGE_NAME }}
-            export IMAGE_TAG=$VERSION  # 使用语义化版本号而不是 SHA
-
-            # Pull the new image and restart services using docker-compose
+            export IMAGE_TAG=$VERSION
+            
+            # 拉取新镜像并重启服务
+            echo "拉取新镜像..."
             docker-compose pull api
             
-            # 显示容器镜像信息
-            echo "Available images:"
+            # 显示镜像信息
+            echo "可用镜像:"
             docker images | grep ${IMAGE_NAME}
             
-            # 停止并移除旧容器
-            docker-compose down || true
-            
-            # 启动新容器
-            docker-compose up -d --remove-orphans
+            # 停止并重启服务
+            echo "重启服务..."
+            docker-compose down
+            docker-compose up -d
             
             # 检查容器状态
             docker-compose ps
             
-            # 查看容器日志
-            echo "API container logs:"
-            docker-compose logs api
-            
-            # 使用健康检查替代固定等待时间
-            echo "Waiting for API service to be healthy..."
-            timeout=60
+            # 等待服务准备就绪
+            echo "等待API服务就绪..."
+            timeout=90
             while [ $timeout -gt 0 ]; do
-              if docker-compose exec -T api curl -s http://localhost:8000/ > /dev/null; then
-                echo "API service is healthy!"
+              if docker-compose exec -T api curl -s http://localhost:8000/health > /dev/null; then
+                echo "API服务已就绪!"
                 break
               fi
-              echo "Waiting for API to be ready... ($timeout seconds left)"
-              # 检查容器是否还在运行
+              echo "等待API就绪... (剩余 $timeout 秒)"
               if ! docker-compose ps | grep api | grep -q "Up"; then
-                echo "ERROR: API container is not running! Container logs:"
+                echo "错误: API容器未运行! 容器日志:"
                 docker-compose logs api
                 exit 1
               fi
@@ -204,43 +143,41 @@ jobs:
             done
             
             if [ $timeout -le 0 ]; then
-              echo "Warning: API service did not become healthy within timeout"
-              echo "Container logs:"
+              echo "警告: API服务未在超时时间内就绪"
               docker-compose logs api
-              # 继续执行，因为有些服务可能不提供健康检查端点
             fi
             
-            # 运行数据库迁移，添加错误处理
-            echo "Running database migrations..."
+            # 运行数据库迁移
+            echo "运行数据库迁移..."
             if ! docker-compose exec -T api alembic upgrade head; then
-              echo "Error: Database migration failed!"
+              echo "错误: 数据库迁移失败!"
               exit 1
             fi
             
-            echo "Deployment completed successfully! Version: $VERSION"
+            echo "部署成功完成! 版本: $VERSION"
       
-      # 添加一个等待步骤，确保服务有足够时间启动
-      - name: Wait for service to start
+      # 等待服务启动
+      - name: 等待服务启动
         run: sleep 15
       
       # 检查服务健康状态
-      - name: Check service health
+      - name: 检查服务健康状态
         id: health_check
         uses: fjogeleit/http-request-action@v1
         with:
           url: ${{ env.API_URL }}/health
           method: 'GET'
-          timeout: 10000
+          timeout: 15000
       
       # 显示健康检查结果
-      - name: Display health check result
+      - name: 显示健康检查结果
         run: |
-          echo "Health check status: ${{ fromJson(steps.health_check.outputs.response).status }}"
-          echo "Database status: ${{ fromJson(steps.health_check.outputs.response).database }}"
-          echo "Service version: ${{ fromJson(steps.health_check.outputs.response).version }}"
+          echo "健康检查状态: ${{ fromJson(steps.health_check.outputs.response).status }}"
+          echo "数据库状态: ${{ fromJson(steps.health_check.outputs.response).database }}"
+          echo "服务版本: ${{ fromJson(steps.health_check.outputs.response).version }}"
           
-          # 验证服务是否健康
           if [ "${{ fromJson(steps.health_check.outputs.response).status }}" != "healthy" ]; then
-            echo "::warning::Service health check returned non-healthy status: ${{ fromJson(steps.health_check.outputs.response).status }}"
+            echo "::warning::服务健康检查返回非健康状态: ${{ fromJson(steps.health_check.outputs.response).status }}"
           else
-            echo "::notice::Service is healthy and running version ${{ fromJson(steps.health_check.outputs.response).version }}" 
+            echo "::notice::服务健康且运行版本 ${{ fromJson(steps.health_check.outputs.response).version }}" 
+          fi 

@@ -10,25 +10,22 @@ docker-compose.yml
 
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
+*.pyc
+*.pyo
+*.pyd
 .Python
 env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-*.egg-info/
-.installed.cfg
-*.egg
+venv/
+.git/
+.github/
+.gitignore
+.env
+*.md
+tests/
+storage/
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Virtual Environment
 venv/
@@ -45,5 +42,4 @@ ENV/
 # Project specific
 storage/uploads/*
 !storage/uploads/.gitkeep
-tests/
 README.md 

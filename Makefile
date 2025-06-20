@@ -1,42 +1,59 @@
-.PHONY: setup install dev requirements migrate docker-db clean
+.PHONY: dev build requirements migrate test docker-build
 
-# 设置开发环境
-setup:
-	@echo "创建虚拟环境..."
-	uv venv
-	@echo "安装依赖..."
-	uv pip install --pyproject pyproject.toml
+# 默认目标
+all: help
 
-# 安装依赖
+# 安装开发依赖
 install:
-	uv pip install --pyproject pyproject.toml
+	poetry install
 
-# 启动开发服务器
-dev:
-	uvicorn api.index:app --reload
-
-# 生成 requirements.txt
+# 从 pyproject.toml 生成 requirements.txt
 requirements:
-	./scripts/generate_requirements.sh
+	poetry export -f requirements.txt --output requirements.txt --without-hashes
+	@echo "已更新 requirements.txt"
 
-# 运行数据库迁移
+# 开发环境运行
+dev:
+	uvicorn api.index:app --reload --host 0.0.0.0 --port 8000
+
+# 构建 Docker 映像
+docker-build:
+	docker build -t evolve-common-api:local .
+
+# 启动本地开发环境 (使用 docker-compose)
+docker-dev:
+	docker-compose up -d
+
+# 停止本地开发环境
+docker-stop:
+	docker-compose down
+
+# 运行测试
+test:
+	pytest
+
+# 运行数据库升级
 migrate:
 	alembic upgrade head
 
-# 启动 PostgreSQL 数据库 Docker 容器
-docker-db:
-	@echo "停止并删除现有的 evolve-db 容器（如果存在）..."
-	-docker stop evolve-db
-	-docker rm evolve-db
-	@echo "启动新的 PostgreSQL 容器..."
-	docker run -d --name evolve-db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=evolve -p 5432:5432 postgres:15-alpine
-	@echo "等待 PostgreSQL 启动..."
-	sleep 3
-	@echo "PostgreSQL 已启动，可通过 localhost:5432 访问"
+# 创建数据库迁移
+migration:
+	alembic revision --autogenerate -m "$(m)"
 
-# 清理
-clean:
-	@echo "清理临时文件和缓存..."
-	find . -type d -name __pycache__ -exec rm -rf {} +
-	find . -type d -name .pytest_cache -exec rm -rf {} +
-	find . -type f -name "*.pyc" -delete 
+# 查看容器日志
+logs:
+	docker-compose logs -f
+
+# 帮助信息
+help:
+	@echo "可用命令:"
+	@echo "  make install        - 安装开发依赖"
+	@echo "  make requirements   - 从 pyproject.toml 生成 requirements.txt"
+	@echo "  make dev            - 启动开发服务器"
+	@echo "  make docker-build   - 构建 Docker 映像"
+	@echo "  make docker-dev     - 使用 docker-compose 启动本地开发环境"
+	@echo "  make docker-stop    - 停止本地开发环境"
+	@echo "  make test           - 运行测试"
+	@echo "  make migrate        - 运行数据库迁移"
+	@echo "  make migration m=描述 - 创建数据库迁移文件"
+	@echo "  make logs           - 查看容器日志" 

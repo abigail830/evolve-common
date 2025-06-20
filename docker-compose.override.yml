@@ -1,0 +1,13 @@
+# 本地开发环境的配置覆盖
+services:
+  api:
+    build: .
+    image: evolve-common-api:local
+    volumes:
+      - ./api:/app/api
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+    command: python -m uvicorn api.index:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=true 
