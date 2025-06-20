@@ -91,6 +91,41 @@ jobs:
             mkdir -p ~/${{ secrets.CVM_USERNAME }}/evolve-common
             cd ~/${{ secrets.CVM_USERNAME }}/evolve-common
             
+            # 创建docker-compose.yml文件
+            cat > docker-compose.yml << 'EOL'
+            version: '3'
+            
+            services:
+              api:
+                image: ${TCR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+                restart: unless-stopped
+                ports:
+                  - "8000:8000"
+                environment:
+                  - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@db:5432/evolve}
+                  - ENVIRONMENT=production
+                                 healthcheck:
+                  test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+                  interval: 10s
+                  timeout: 5s
+                  retries: 5
+              
+              db:
+                image: postgres:15
+                restart: unless-stopped
+                ports:
+                  - "5432:5432"
+                environment:
+                  - POSTGRES_USER=postgres
+                  - POSTGRES_PASSWORD=postgres
+                  - POSTGRES_DB=evolve
+                volumes:
+                  - postgres_data:/var/lib/postgresql/data
+            
+            volumes:
+              postgres_data:
+            EOL
+            
             # 确保必要的环境变量存在
             if [ -z "${{ secrets.TCR_REGISTRY }}" ] || [ -z "${{ secrets.TCR_USERNAME }}" ] || [ -z "${{ secrets.TCR_PASSWORD }}" ]; then
               echo "错误: 缺少容器镜像服务相关密钥"
@@ -114,13 +149,34 @@ jobs:
             export IMAGE_NAME=${{ env.IMAGE_NAME }}
             export IMAGE_TAG=$VERSION
             
+            # 设置 Docker 配置以增加超时时间和使用镜像加速
+            mkdir -p /etc/docker
+            cat > /etc/docker/daemon.json << 'EOL'
+            {
+              "registry-mirrors": ["https://mirror.ccs.tencentyun.com"],
+              "max-concurrent-downloads": 10,
+              "log-driver": "json-file",
+              "log-opts": {
+                "max-size": "100m"
+              }
+            }
+            EOL
+            
+            # 重启 Docker 以应用新配置
+            systemctl restart docker || service docker restart
+            
             # 拉取新镜像并重启服务
             echo "拉取新镜像..."
-            docker-compose pull api
+            export COMPOSE_HTTP_TIMEOUT=300
+            docker-compose pull api --no-cache || true
             
             # 显示镜像信息
             echo "可用镜像:"
             docker images | grep ${IMAGE_NAME}
+            
+            # 检查是否能连接到腾讯云容器服务
+            echo "测试连接到 ${TCR_REGISTRY}..."
+            curl -k -m 10 https://${TCR_REGISTRY} || echo "无法连接到镜像仓库，但将继续尝试"
             
             # 停止并重启服务
             echo "重启服务..."
