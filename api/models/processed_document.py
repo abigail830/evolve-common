@@ -12,4 +12,5 @@ class ProcessedDocument(Base):
     format = Column(String, nullable=False, default="html")  # e.g., html, markdown
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    original_document = relationship("Document", back_populates="processed_documents") 
+    original_document = relationship("Document", back_populates="processed_documents")
+    nodes = relationship("DocumentNode", back_populates="processed_document", cascade="all, delete-orphan") 

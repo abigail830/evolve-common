@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import UploadFile, HTTPException
 from sqlalchemy.orm import Session
 import os
+from sqlalchemy import desc
 
 from api.models.document import Document
 from api.models.processed_document import ProcessedDocument
@@ -83,7 +84,7 @@ def create_processed_document(db: Session, *, processed_document_in: ProcessedDo
 
 async def delete_document(document_id: int, db: Session) -> bool:
     """
-    删除指定 ID 的文档及其关联的物理文件。
+    删除指定 ID 的文档及其所有关联的处理文档和物理文件。
     
     Args:
         document_id: 要删除的文档 ID
@@ -99,20 +100,31 @@ async def delete_document(document_id: int, db: Session) -> bool:
     if not document:
         return False
     
-    # 获取文件路径并检查是否存在
+    # 1. 首先删除所有关联的处理文档
+    processed_documents = get_processed_documents_by_original_id(db, original_document_id=document_id)
+    for processed_doc in processed_documents:
+        # 使用已有的delete_processed_document函数删除每个处理文档
+        await delete_processed_document(db, processed_document_id=processed_doc.id)
+    
+    # 2. 删除原始文档的物理文件
     filepath = Path(document.filepath)
     if filepath.exists():
         try:
             # 删除物理文件
             filepath.unlink()
             
-            # 如果文件所在目录为空，也可以选择删除目录
-            # 这里我们只删除文件，保留目录结构
+            # 如果文件目录为空，尝试删除目录
+            try:
+                parent_dir = filepath.parent
+                if parent_dir.exists() and not any(parent_dir.iterdir()):
+                    parent_dir.rmdir()
+            except Exception as e:
+                print(f"Warning: Could not delete empty directory {parent_dir}: {e}")
         except Exception as e:
             # 如果文件删除失败，记录错误但继续删除数据库记录
             print(f"Warning: Could not delete file {filepath}: {e}")
     
-    # 删除数据库记录
+    # 3. 删除数据库记录
     db.delete(document)
     db.commit()
     
@@ -206,3 +218,21 @@ async def delete_processed_document(db: Session, processed_document_id: int) -> 
     db.commit()
     
     return True 
+
+
+def get_latest_processed_document_by_format(db: Session, original_document_id: int, format: str = "html") -> ProcessedDocument | None:
+    """
+    获取指定原始文档的最新处理文档，按指定格式过滤。
+    
+    Args:
+        db: 数据库会话
+        original_document_id: 原始文档ID
+        format: 文档格式，默认为"html"
+    
+    Returns:
+        ProcessedDocument: 处理过的文档对象，如果不存在则返回None
+    """
+    return db.query(ProcessedDocument).filter(
+        ProcessedDocument.original_document_id == original_document_id,
+        ProcessedDocument.format == format
+    ).order_by(desc(ProcessedDocument.created_at)).first() 
