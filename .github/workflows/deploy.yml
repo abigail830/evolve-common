@@ -15,13 +15,17 @@ jobs:
   build-and-push:
     name: 构建并推送镜像
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: 检出代码
         uses: actions/checkout@v3
 
       - name: 设置 Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            network=host
+            image=moby/buildkit:latest
 
       - name: 提取版本号
         id: get_version
@@ -37,15 +41,6 @@ jobs:
           username: ${{ secrets.TCR_USERNAME }}
           password: ${{ secrets.TCR_PASSWORD }}
 
-      # 使用GitHub Actions的缓存机制
-      - name: 设置Docker构建缓存
-        uses: actions/cache@v3
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
-
       - name: 构建并推送Docker镜像
         id: build-and-push
         uses: docker/build-push-action@v5
@@ -56,17 +51,27 @@ jobs:
             ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
             ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}
             ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           build-args: |
-            BUILDKIT_INLINE_CACHE=1
             VERSION=${{ env.VERSION }}
+          outputs: type=image,compression=gzip
+          provenance: false
 
-      # 更新缓存
-      - name: 移动缓存
+      # 添加构建后检查步骤
+      - name: 构建结果检查
+        if: always()
         run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+          echo "构建结果: ${{ steps.build-and-push.outcome }}"
+          echo "构建详情: ${{ steps.build-and-push.outputs }}"
+          docker images
+
+      # 添加网络测试步骤
+      - name: 网络连接测试
+        run: |
+          echo "测试与腾讯云容器镜像服务的连接..."
+          ping -c 3 ${{ env.TCR_REGISTRY }} || true
+          curl -I https://${{ env.TCR_REGISTRY }} || true
 
   deploy:
     name: 部署到腾讯云服务器

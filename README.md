@@ -144,23 +144,14 @@ poetry run uvicorn api.index:app --reload --port 8000
 
 本项目使用 `pyproject.toml` 作为主要依赖管理文件，并使用 `uv` 作为包管理工具。
 
-### 安装 uv
+### 
 
 ```bash
+# 安装 uv
 brew install uv
-```
-
-### 设置开发环境
-
-```bash
+# 设置开发环境
 make setup
-```
-
-这将创建一个虚拟环境并安装所有依赖。
-
-### 生成 requirements.txt
-
-```bash
+# 生成 requirements.txt
 make requirements
 ```
 
@@ -168,36 +159,24 @@ make requirements
 
 ## 本地开发
 
-### 启动数据库
+### 启动数据库 & 运行数据库迁移
 
 ```bash
 make docker-db
-```
-
-这将启动一个 PostgreSQL 数据库容器。
-
-### 运行数据库迁移
-
-```bash
 make migrate
 ```
 
-### 启动开发服务器
-
-```bash
-make dev
-```
-
-## Docker 部署
+## 启动开发服务器 & Docker 部署
 
 ### 构建和运行 Docker 容器
-
 ```bash
+make dev
 # 首先生成 requirements.txt
 make requirements
-
 # 然后构建并启动容器
 docker-compose up -d --build
+# 检查docker服务
+docker ps | grep postgres
 ```
 
 ## API 文档
