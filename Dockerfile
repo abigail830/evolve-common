@@ -38,7 +38,7 @@ RUN mkdir -p /app/storage/uploads && chmod -R 777 /app/storage
 # 添加元数据标签
 LABEL version="${APP_VERSION}" \
       maintainer="Evolve Team" \
-      description="Evolve Common API Service"
+      description="Evolve file-processing Service"
 
 # 暴露端口
 EXPOSE 8000

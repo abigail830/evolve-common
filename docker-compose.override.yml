@@ -2,7 +2,7 @@
 services:
   api:
     build: .
-    image: evolve-common-api:local
+    image: evolve-file-processor:local
     volumes:
       - ./api:/app/api
       - ./alembic:/app/alembic

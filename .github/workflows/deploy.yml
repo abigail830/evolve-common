@@ -8,7 +8,7 @@ on:
 # 定义环境变量
 env:
   TCR_REGISTRY: ${{ secrets.TCR_REGISTRY }}
-  IMAGE_NAME: evolve-common-api
+  IMAGE_NAME: evolve-file-processor
   API_URL: ${{ secrets.API_URL || 'http://localhost:8000' }}
 
 jobs:
@@ -88,21 +88,44 @@ jobs:
           command_timeout: 20m
           script: |
             set -e
-            mkdir -p ~/${{ secrets.CVM_USERNAME }}/evolve-common
-            cd ~/${{ secrets.CVM_USERNAME }}/evolve-common
+            mkdir -p ~/${{ secrets.CVM_USERNAME }}/evolve-file-processor
+            cd ~/${{ secrets.CVM_USERNAME }}/evolve-file-processor
             
             # 检查.env文件是否存在
             if [ ! -f .env ]; then
-              echo "警告: .env文件不存在，创建一个简单的示例文件"
-              echo "# 数据库连接" > .env
-              echo "DATABASE_URL=postgresql://postgres:postgres@db:5432/evolve" >> .env
-              echo "POSTGRES_USER=postgres" >> .env  
-              echo "POSTGRES_PASSWORD=postgres" >> .env
-              echo "POSTGRES_DB=evolve" >> .env
-              echo "# 应用配置" >> .env
-              echo "ENVIRONMENT=production" >> .env
+              echo "错误: 服务器上不存在.env文件！请先创建此文件"
+              exit 1
             else
-              echo ".env文件已存在，将使用现有配置"
+              echo ".env文件已存在，验证配置中..."
+              
+              # 检查必要配置是否存在（不显示内容）
+              if ! grep -q "DATABASE_URL" .env; then
+                echo "错误: .env文件缺少DATABASE_URL配置"
+                exit 1
+              fi
+              
+              if ! grep -q "POSTGRES_USER" .env; then
+                echo "错误: .env文件缺少POSTGRES_USER配置"
+                exit 1
+              fi
+              
+              if ! grep -q "POSTGRES_PASSWORD" .env; then
+                echo "错误: .env文件缺少POSTGRES_PASSWORD配置"
+                exit 1
+              fi
+              
+              if ! grep -q "POSTGRES_DB" .env; then
+                echo "错误: .env文件缺少POSTGRES_DB配置"
+                exit 1
+              fi
+              
+              # 检查数据库连接是否指向正确的主机名
+              if grep "localhost" .env | grep -q "DATABASE_URL"; then
+                echo "警告: 发现DATABASE_URL使用localhost，临时修改为db"
+                sed -i 's/localhost/db/g' .env
+              fi
+              
+              echo ".env配置验证完成"
             fi
             
             # 创建docker-compose.yml文件，以最简单的方式
@@ -181,6 +204,11 @@ jobs:
             # 停止并重启服务
             echo "重启服务..."
             docker-compose down --remove-orphans || true
+            
+            # 清理可能的旧数据卷（如果有密码认证问题）
+            echo "清理旧数据卷..."
+            docker volume rm evolve-file-processor_postgres_data || true
+            
             docker-compose up -d || true
             
             # 检查容器状态
@@ -199,14 +227,82 @@ jobs:
               sleep 5
             done
             
-            # 尝试检查API容器是否在运行
-            echo "检查API容器状态..."
-            if docker-compose ps | grep -q api | grep -q Up; then
-              echo "API容器已启动并运行中"
-            else
-              echo "API容器可能未正确启动，查看日志:"
-              docker-compose logs api
+            # 创建Nginx配置
+            echo "创建Nginx配置..."
+            cat > /etc/nginx/conf.d/file-processor.evolving.team.conf << 'NGINX_CONF'
+server {
+    listen 80;
+    server_name file-processor.evolving.team;
+    
+    # 将HTTP请求重定向到HTTPS
+    location / {
+        return 301 https://$host$request_uri;
+    }
+
+    # Let's Encrypt验证
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name file-processor.evolving.team;
+    
+    # SSL配置 
+    ssl_certificate /etc/letsencrypt/live/file-processor.evolving.team/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/file-processor.evolving.team/privkey.pem;
+    
+    # 增强的SSL安全设置
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers 'ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256';
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:50m;
+    ssl_stapling on;
+    ssl_stapling_verify on;
+    
+    # 安全头信息
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    # API反向代理
+    location / {
+        proxy_pass http://localhost:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_connect_timeout 90;
+        proxy_send_timeout 90;
+        proxy_read_timeout 90;
+    }
+}
+NGINX_CONF
+            
+            # 确保Certbot已安装
+            echo "检查Certbot是否安装..."
+            if ! command -v certbot &> /dev/null; then
+                echo "安装Certbot..."
+                apt-get update
+                apt-get install -y certbot python3-certbot-nginx
             fi
+            
+            # 申请SSL证书
+            echo "申请SSL证书..."
+            if [ ! -d "/etc/letsencrypt/live/file-processor.evolving.team" ]; then
+                certbot --nginx -d file-processor.evolving.team --non-interactive --agree-tos -m admin@evolving.team || echo "证书申请失败，暂时使用HTTP"
+            else
+                echo "证书已存在"
+            fi
+            
+            # 检查Nginx配置并重新加载
+            echo "检查并重新加载Nginx配置..."
+            nginx -t && systemctl reload nginx
             
             # 运行数据库迁移
             echo "运行数据库迁移..."

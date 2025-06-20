@@ -1,6 +1,6 @@
-# Evolve Common Service
+# Evolve File Processor
 
-A common backend service for document processing, AI agents, and more, built with FastAPI. This project serves as the core infrastructure for various AI-powered applications.
+A backend service for document processing, AI agents, and more, built with FastAPI. This project serves as the core infrastructure for various AI-powered applications.
 
 ---
 
@@ -9,7 +9,6 @@ A common backend service for document processing, AI agents, and more, built wit
 - **Document Processing**: Uploading, parsing (`docling`), and chunking.
 - **Document Structuring**: Hierarchical parsing of HTML documents based on heading levels.
 - **AI Capabilities**: Extensible design for future embedding and reranking services.
-- **Agentic Workflows**: Utilizes `langgraph` to build complex, stateful AI agents.
 - **Modern API**: Asynchronous API built with FastAPI, with automatic Swagger/OpenAPI documentation.
 - **Containerized**: Comes with a Docker and Docker Compose setup for easy development and deployment.
 - **Database Migrations**: Uses Alembic for robust database schema versioning.
@@ -20,7 +19,7 @@ A common backend service for document processing, AI agents, and more, built wit
 - **Framework**: FastAPI
 - **Database**: PostgreSQL
 - **ORM & Migrations**: SQLAlchemy, Alembic
-- **AI/LLM Frameworks**: LangGraph, Docling, Langchain
+- **Document Processing**: Docling
 - **Dependency Management**: Poetry
 - **Containerization**: Docker, Docker Compose
 
@@ -166,9 +165,8 @@ make docker-db
 make migrate
 ```
 
-## 启动开发服务器 & Docker 部署
+### 启动开发服务器 & Docker 部署
 
-### 构建和运行 Docker 容器
 ```bash
 make dev
 # 首先生成 requirements.txt
@@ -179,73 +177,27 @@ docker-compose up -d --build
 docker ps | grep postgres
 ```
 
+## 部署到腾讯云
+
+本项目配置了GitHub Actions工作流，可以自动构建并部署到腾讯云服务器。网站将通过HTTPS协议在`file-processor.evolving.team`域名上提供服务。
+
+### 部署配置
+
+- **镜像名称**: evolve-file-processor
+- **访问地址**: https://file-processor.evolving.team
+- **反向代理**: 使用Nginx配置SSL和反向代理
+- **数据持久化**: PostgreSQL数据存储在Docker卷中
+
 ## API 文档
 
 启动服务后，可以访问以下 URL 查看 API 文档：
 
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+- Swagger UI: http://localhost:8000/docs (本地开发)
+- ReDoc: http://localhost:8000/redoc (本地开发)
+- 生产环境: https://file-processor.evolving.team/docs
 
 ---
 
 ## 📂 Project Structure
 
 ```
-/
-├── alembic/              # Database migration scripts
-├── api/                  # All application source code
-│   ├── core/             # Core logic, settings
-│   ├── db/               # Database session management and base models
-│   ├── endpoints/        # API route definitions
-│   ├── models/           # SQLAlchemy data models
-│   ├── schemas/          # Pydantic data schemas (for API I/O)
-│   ├── services/         # Business logic services
-│   └── index.py          # FastAPI application entrypoint
-├── tests/                # Application tests
-├── .gitignore            # Git ignore file
-├── alembic.ini           # Alembic configuration
-├── Dockerfile            # Dockerfile for the application
-├── docker-compose.yml    # Docker Compose configuration
-├── pyproject.toml        # Project dependencies and metadata (Poetry)
-└── README.md             # This file
-```
-
-## 📑 Document Structure Parsing
-
-The system implements a hierarchical document structure parsing capability based on HTML heading levels:
-
-### Key Features
-
-- **Hierarchical Structure**: Documents are parsed according to heading levels (h1-h6), creating a proper tree structure.
-- **Intelligent Content Grouping**: Content elements (text, tables, images) are grouped under their parent headings.
-- **Merged Text Blocks**: Consecutive text elements under the same heading are merged for cleaner structure.
-- **Four Basic Node Types**:
-  - `HEADER`: Heading elements (h1-h6), forming the structure backbone
-  - `TABLE`: Table elements with metadata about rows and columns
-  - `IMAGE`: Image elements with source and alt information
-  - `TEXT`: All other textual content including paragraphs, lists, and quotes
-
-### Structure Example
-
-```
-h1: Document Title                (depth 0)
-├── Text Block                    (depth 1)
-├── Table                         (depth 1)
-├── h2: First Chapter             (depth 1)
-│   ├── Text Block                (depth 2)
-│   ├── Image                     (depth 2)
-│   └── h3: First Section         (depth 2)
-│       └── Text Block            (depth 3)
-├── h2: Second Chapter            (depth 1)
-│   └── Table                     (depth 2)
-└── Image                         (depth 1)
-```
-
-### API Endpoints
-
-- `POST /processed/{processed_document_id}/structured` - Process and structure an HTML document
-- `GET /processed/{processed_document_id}/structure` - Get document structure as a hierarchical tree
-- `GET /processed/{processed_document_id}/toc` - Get the table of contents (headers only) as a hierarchical tree
-- `GET /processed/{processed_document_id}/search-headers?query={text}` - Search headers by content and get matching sections
-- `DELETE /processed/{processed_document_id}/structure` - Delete the existing structure for a document
-- `GET /nodes/{node_id}/content` - Get a specific node and its children (useful for extracting sections)
