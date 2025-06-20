@@ -91,6 +91,20 @@ jobs:
             mkdir -p ~/${{ secrets.CVM_USERNAME }}/evolve-common
             cd ~/${{ secrets.CVM_USERNAME }}/evolve-common
             
+            # 检查.env文件是否存在
+            if [ ! -f .env ]; then
+              echo "警告: .env文件不存在，创建一个简单的示例文件"
+              echo "# 数据库连接" > .env
+              echo "DATABASE_URL=postgresql://postgres:postgres@db:5432/evolve" >> .env
+              echo "POSTGRES_USER=postgres" >> .env  
+              echo "POSTGRES_PASSWORD=postgres" >> .env
+              echo "POSTGRES_DB=evolve" >> .env
+              echo "# 应用配置" >> .env
+              echo "ENVIRONMENT=production" >> .env
+            else
+              echo ".env文件已存在，将使用现有配置"
+            fi
+            
             # 创建docker-compose.yml文件，以最简单的方式
             echo "version: '3'" > docker-compose.yml
             echo "services:" >> docker-compose.yml
@@ -98,6 +112,19 @@ jobs:
             echo "    image: \${TCR_REGISTRY}/\${IMAGE_NAME}:\${IMAGE_TAG}" >> docker-compose.yml
             echo "    ports:" >> docker-compose.yml
             echo "      - \"8000:8000\"" >> docker-compose.yml
+            echo "    env_file: .env" >> docker-compose.yml
+            echo "    depends_on:" >> docker-compose.yml
+            echo "      - db" >> docker-compose.yml
+            echo "  db:" >> docker-compose.yml
+            echo "    image: postgres:15" >> docker-compose.yml
+            echo "    restart: unless-stopped" >> docker-compose.yml
+            echo "    ports:" >> docker-compose.yml
+            echo "      - \"5432:5432\"" >> docker-compose.yml
+            echo "    env_file: .env" >> docker-compose.yml
+            echo "    volumes:" >> docker-compose.yml
+            echo "      - postgres_data:/var/lib/postgresql/data" >> docker-compose.yml
+            echo "volumes:" >> docker-compose.yml
+            echo "  postgres_data: {}" >> docker-compose.yml
             
             # 确保必要的环境变量存在
             if [ -z "${{ secrets.TCR_REGISTRY }}" ] || [ -z "${{ secrets.TCR_USERNAME }}" ] || [ -z "${{ secrets.TCR_PASSWORD }}" ]; then
@@ -153,25 +180,37 @@ jobs:
             
             # 停止并重启服务
             echo "重启服务..."
-            docker-compose down || true
+            docker-compose down --remove-orphans || true
             docker-compose up -d || true
             
             # 检查容器状态
             echo "查看容器状态..."
             docker-compose ps || true
             
-            # 等待几秒钟让服务启动
-            echo "等待服务启动..."
-            sleep 30
+            # 等待数据库就绪
+            echo "等待数据库就绪..."
+            sleep 10
+            for i in {1..12}; do
+              if docker-compose exec -T db pg_isready -U postgres; then
+                echo "数据库已就绪!"
+                break
+              fi
+              echo "等待数据库就绪... 尝试 $i/12"
+              sleep 5
+            done
             
-            # 简单检查服务是否在运行
-            echo "检查服务是否运行..."
-            if docker-compose ps | grep -q api; then
-              echo "API服务已启动!"
+            # 尝试检查API容器是否在运行
+            echo "检查API容器状态..."
+            if docker-compose ps | grep -q api | grep -q Up; then
+              echo "API容器已启动并运行中"
             else
-              echo "警告: API服务可能未正确启动"
-              docker-compose logs api || true
+              echo "API容器可能未正确启动，查看日志:"
+              docker-compose logs api
             fi
+            
+            # 运行数据库迁移
+            echo "运行数据库迁移..."
+            docker-compose exec -T api alembic upgrade head || echo "数据库迁移失败，请手动检查"
             
             echo "部署完成!"
       
