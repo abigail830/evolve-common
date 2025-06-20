@@ -1,8 +1,8 @@
 [tool.poetry]
-name = "evolve-common"
+name = "evolve-file-processor"
 version = "0.1.0"
-description = "Common backend services for Evolve AI applications."
-authors = ["Your Name <you@example.com>"]
+description = "File processing backend services for Evolve AI applications."
+authors = ["abigail830@163.com"]
 readme = "README.md"
 
 [tool.poetry.dependencies]

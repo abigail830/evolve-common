@@ -18,7 +18,7 @@ dev:
 
 # 构建 Docker 映像
 docker-build:
-	docker build -t evolve-common-api:local .
+	docker build -t evolve-file-processor:local .
 
 # 启动本地开发环境 (使用 docker-compose)
 docker-dev:
