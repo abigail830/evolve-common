@@ -13,8 +13,8 @@ load_dotenv()
 VERSION = os.environ.get("APP_VERSION", "0.1.0")
 
 app = FastAPI(
-    title="Evolve Common Service",
-    description="A common backend service for document processing, AI agents, and more.",
+    title="Evolve File Processor",
+    description="A file processing backend service",
     version=VERSION,
 )
 

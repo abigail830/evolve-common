@@ -5,7 +5,7 @@ from pydantic import BaseModel
 class Settings(BaseModel):
     """应用配置"""
     # 项目名称
-    PROJECT_NAME: str = "Evolve Common API"
+    PROJECT_NAME: str = "Evolve file processing API"
     
     # API版本
     API_V1_STR: str = "/api/v1"

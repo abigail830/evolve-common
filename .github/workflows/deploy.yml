@@ -42,12 +42,6 @@ jobs:
           username: ${{ secrets.TCR_USERNAME }}
           password: ${{ secrets.TCR_PASSWORD }}
 
-      # 添加copy轻量级依赖文件的步骤
-      - name: 生成轻量级依赖文件
-        run: |
-          cp requirements-lightweight.txt requirements.txt
-          echo "使用轻量级依赖文件，排除torch等大型依赖"
-
       # 将构建和推送分为两个步骤
       - name: 构建Docker镜像
         uses: docker/build-push-action@v5
@@ -60,7 +54,6 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             VERSION=${{ env.VERSION }}
-            LIGHTWEIGHT_INSTALL=true
           outputs: type=docker
 
       # 添加多个推送步骤，每个版本单独推送

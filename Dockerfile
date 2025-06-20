@@ -10,18 +10,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件和源代码
-COPY pyproject.toml .
-COPY requirements-lightweight.txt .
+COPY requirements.txt .
 COPY api ./api
 COPY alembic ./alembic
 COPY alembic.ini .
 
-# 创建虚拟环境并安装轻量级依赖
+# 创建虚拟环境并安装依赖
 RUN python -m venv /opt/venv && \
     /opt/venv/bin/pip install --upgrade pip wheel && \
-    # 先安装基础依赖
-    /opt/venv/bin/pip install --no-cache-dir -r requirements-lightweight.txt && \
-    # 特殊处理docling包 - 重新安装但不安装其依赖
+    # 先安装除docling以外的所有依赖
+    grep -v "^docling==" requirements.txt > other_requirements.txt && \
+    /opt/venv/bin/pip install --no-cache-dir -r other_requirements.txt && \
+    # 单独安装docling，不安装其依赖以避免torch等大型库
     /opt/venv/bin/pip install --no-cache-dir --no-deps docling==2.36.1
 
 # 最终阶段，使用更小的基础镜像
