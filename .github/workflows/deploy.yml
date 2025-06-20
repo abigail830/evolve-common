@@ -26,6 +26,7 @@ jobs:
           driver-opts: |
             network=host
             image=moby/buildkit:latest
+          buildkitd-flags: "--debug"  # 添加调试信息
 
       - name: 提取版本号
         id: get_version
@@ -41,30 +42,55 @@ jobs:
           username: ${{ secrets.TCR_USERNAME }}
           password: ${{ secrets.TCR_PASSWORD }}
 
-      - name: 构建并推送Docker镜像
-        id: build-and-push
+      # 添加copy轻量级依赖文件的步骤
+      - name: 生成轻量级依赖文件
+        run: |
+          cp requirements-lightweight.txt requirements.txt
+          echo "使用轻量级依赖文件，排除torch等大型依赖"
+
+      # 将构建和推送分为两个步骤
+      - name: 构建Docker镜像
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: true
-          tags: |
-            ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-            ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}
-            ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          push: false  # 先不推送
+          load: true   # 加载到本地
+          tags: ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
             VERSION=${{ env.VERSION }}
-          outputs: type=image,compression=gzip
-          provenance: false
+            LIGHTWEIGHT_INSTALL=true
+          outputs: type=docker
+
+      # 添加多个推送步骤，每个版本单独推送
+      - name: 推送latest版本
+        run: |
+          echo "推送latest版本..."
+          docker push ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest || \
+          (echo "第一次推送失败，重试中..." && sleep 5 && docker push ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest)
+
+      - name: 标记SHA版本
+        run: |
+          docker tag ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          echo "推送SHA版本..."
+          docker push ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} || \
+          (echo "第一次推送失败，重试中..." && sleep 5 && docker push ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }})
+
+      - name: 标记版本号
+        run: |
+          docker tag ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}
+          echo "推送版本号版本..."
+          docker push ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }} || \
+          (echo "第一次推送失败，重试中..." && sleep 5 && docker push ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }})
 
       # 添加构建后检查步骤
       - name: 构建结果检查
         if: always()
         run: |
-          echo "构建结果: ${{ steps.build-and-push.outcome }}"
-          echo "构建详情: ${{ steps.build-and-push.outputs }}"
-          docker images
+          echo "构建结果: 完成"
+          echo "镜像信息:"
+          docker images | grep ${{ env.IMAGE_NAME }}
 
       # 添加网络测试步骤
       - name: 网络连接测试

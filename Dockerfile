@@ -9,14 +9,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制依赖文件
-COPY requirements.txt .
+# 复制依赖文件和源代码
+COPY pyproject.toml .
+COPY requirements-lightweight.txt .
+COPY api ./api
+COPY alembic ./alembic
+COPY alembic.ini .
 
-# 创建虚拟环境并安装依赖
+# 创建虚拟环境并安装轻量级依赖
 RUN python -m venv /opt/venv && \
-    /opt/venv/bin/pip install --upgrade pip && \
-    /opt/venv/bin/pip install --no-cache-dir wheel && \
-    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+    /opt/venv/bin/pip install --upgrade pip wheel && \
+    # 先安装基础依赖
+    /opt/venv/bin/pip install --no-cache-dir -r requirements-lightweight.txt && \
+    # 特殊处理docling包 - 重新安装但不安装其依赖
+    /opt/venv/bin/pip install --no-cache-dir --no-deps docling==2.36.1
 
 # 最终阶段，使用更小的基础镜像
 FROM python:3.11-slim-bullseye
@@ -38,10 +44,10 @@ WORKDIR /app
 # 从构建阶段复制虚拟环境
 COPY --from=builder /opt/venv /opt/venv
 
-# 只复制必要的应用代码
-COPY ./api ./api
-COPY ./alembic ./alembic
-COPY alembic.ini .
+# 复制应用代码
+COPY --from=builder /app/api ./api
+COPY --from=builder /app/alembic ./alembic
+COPY --from=builder /app/alembic.ini .
 
 # 创建存储目录并设置权限
 RUN mkdir -p /app/storage/uploads && chmod -R 755 /app/storage
@@ -54,7 +60,8 @@ USER app
 # 添加元数据标签
 LABEL version="${APP_VERSION}" \
       maintainer="Evolve Team" \
-      description="Evolve file-processing Service"
+      description="Evolve file-processing Service" \
+      docling_dependency="lightweight"
 
 # 暴露端口
 EXPOSE 8000

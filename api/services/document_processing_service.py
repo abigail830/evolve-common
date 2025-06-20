@@ -1,10 +1,26 @@
-from docling.document_converter import DocumentConverter
+"""
+注意: 本服务需要安装docling包才能正常工作。
+由于docling依赖较大，我们从requirements.txt中移除了它，以减小基础镜像大小。
+
+如需完整文档处理功能，请手动安装:
+pip install docling==2.36.1
+"""
+
+try:
+    from docling.document_converter import DocumentConverter
+    from docling_core.types.doc import ImageRefMode
+    DOCLING_AVAILABLE = True
+except ImportError:
+    # 如果docling未安装，记录警告并设置标志
+    import logging
+    logging.warning("docling未安装，文档转换功能不可用。请运行'pip install docling==2.36.1'安装。")
+    DOCLING_AVAILABLE = False
+
 from pathlib import Path
 from typing import Optional, Tuple
 import os
 import uuid
 import logging
-from docling_core.types.doc import ImageRefMode
 
 from api.core.config import settings
 
@@ -15,7 +31,12 @@ logger = logging.getLogger(__name__)
 class DocumentToHTMLConverter:
     """使用 Docling 将文档（PPT、PDF、DOC 等）转换为 HTML"""
     def __init__(self):
-        self.converter = DocumentConverter()
+        if not DOCLING_AVAILABLE:
+            logger.warning("初始化DocumentToHTMLConverter，但docling未安装")
+            self.converter = None
+        else:
+            self.converter = DocumentConverter()
+            
         self.supported_formats = [
             '.pdf', '.docx', '.doc', '.pptx', '.ppt',
             '.html', '.htm', '.png', '.jpg', '.jpeg'
@@ -37,6 +58,9 @@ class DocumentToHTMLConverter:
         Returns:
             Tuple[str, str]: (HTML文件路径, 资源目录路径)
         """
+        if not DOCLING_AVAILABLE:
+            raise ImportError("docling未安装，无法执行文档转换。请运行'pip install docling==2.36.1'安装。")
+            
         input_path = Path(file_path)
         if not input_path.exists():
             raise FileNotFoundError(f"Input file not found: {file_path}")
@@ -92,6 +116,10 @@ def test_document_conversion(file_path: str):
     Args:
         file_path: 要转换的文档路径
     """
+    if not DOCLING_AVAILABLE:
+        print("docling未安装，无法执行文档转换。请运行'pip install docling==2.36.1'安装。")
+        return None, None
+        
     try:
         converter = DocumentToHTMLConverter()
         html_file, resources_dir = converter.convert_file(file_path)

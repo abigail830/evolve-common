@@ -5,11 +5,13 @@ all: help
 
 # 安装开发依赖
 install:
-	poetry install
+	poetry install --no-root
 
 # 从 pyproject.toml 生成 requirements.txt
 requirements:
-	poetry export -f requirements.txt --output requirements.txt --without-hashes
+	poetry lock
+	poetry install --no-root
+	poetry run pip freeze > requirements.txt
 	@echo "已更新 requirements.txt"
 
 # 开发环境运行
