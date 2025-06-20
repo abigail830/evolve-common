@@ -91,40 +91,15 @@ jobs:
             mkdir -p ~/${{ secrets.CVM_USERNAME }}/evolve-common
             cd ~/${{ secrets.CVM_USERNAME }}/evolve-common
             
-            # 创建docker-compose.yml文件
-            cat > docker-compose.yml << 'EOL'
-            version: '3'
-            
-            services:
-              api:
-                image: ${TCR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
-                restart: unless-stopped
-                ports:
-                  - "8000:8000"
-                environment:
-                  - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@db:5432/evolve}
-                  - ENVIRONMENT=production
-                                 healthcheck:
-                  test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-                  interval: 10s
-                  timeout: 5s
-                  retries: 5
-              
-              db:
-                image: postgres:15
-                restart: unless-stopped
-                ports:
-                  - "5432:5432"
-                environment:
-                  - POSTGRES_USER=postgres
-                  - POSTGRES_PASSWORD=postgres
-                  - POSTGRES_DB=evolve
-                volumes:
-                  - postgres_data:/var/lib/postgresql/data
-            
-            volumes:
-              postgres_data:
-            EOL
+            # 创建简化的docker-compose.yml文件
+            echo 'version: "3"' > docker-compose.yml
+            echo "" >> docker-compose.yml
+            echo "services:" >> docker-compose.yml
+            echo "  api:" >> docker-compose.yml
+            echo "    image: ${TCR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}" >> docker-compose.yml
+            echo "    restart: unless-stopped" >> docker-compose.yml
+            echo "    ports:" >> docker-compose.yml
+            echo '      - "8000:8000"' >> docker-compose.yml
             
             # 确保必要的环境变量存在
             if [ -z "${{ secrets.TCR_REGISTRY }}" ] || [ -z "${{ secrets.TCR_USERNAME }}" ] || [ -z "${{ secrets.TCR_PASSWORD }}" ]; then
