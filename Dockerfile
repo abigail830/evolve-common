@@ -1,8 +1,13 @@
 # 构建阶段
-FROM python:3.11-slim AS builder
+FROM python:3.11-slim-bullseye AS builder
 
 # 设置工作目录
 WORKDIR /app
+
+# 安装构建依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件
 COPY requirements.txt .
@@ -10,10 +15,11 @@ COPY requirements.txt .
 # 创建虚拟环境并安装依赖
 RUN python -m venv /opt/venv && \
     /opt/venv/bin/pip install --upgrade pip && \
+    /opt/venv/bin/pip install --no-cache-dir wheel && \
     /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
-# 最终阶段
-FROM python:3.11-slim
+# 最终阶段，使用更小的基础镜像
+FROM python:3.11-slim-bullseye
 
 # 设置环境变量
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -21,19 +27,29 @@ ENV PYTHONUNBUFFERED=1
 ENV APP_VERSION=latest
 ENV PATH="/opt/venv/bin:${PATH}"
 
+# 减少安装包的大小
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
 # 设置工作目录
 WORKDIR /app
 
 # 从构建阶段复制虚拟环境
 COPY --from=builder /opt/venv /opt/venv
 
-# 复制应用代码
+# 只复制必要的应用代码
 COPY ./api ./api
 COPY ./alembic ./alembic
 COPY alembic.ini .
 
 # 创建存储目录并设置权限
-RUN mkdir -p /app/storage/uploads && chmod -R 777 /app/storage
+RUN mkdir -p /app/storage/uploads && chmod -R 755 /app/storage
+
+# 使用非root用户运行
+RUN addgroup --system app && adduser --system --group app
+RUN chown -R app:app /app
+USER app
 
 # 添加元数据标签
 LABEL version="${APP_VERSION}" \
