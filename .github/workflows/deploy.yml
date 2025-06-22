@@ -182,15 +182,16 @@ jobs:
               sudo systemctl restart docker || sudo service docker restart
             fi
             
-            # 6. 停止并清理所有相关容器、网络和卷
-            echo "停止并清理之前的容器和相关资源..."
-            # 先停止所有容器
+            # 6. 停止并清理所有相关容器、网络和卷（保留数据库数据）
+            echo "停止并清理之前的容器和相关资源（保留数据库数据）..."
+            # 先停止所有容器，但不删除卷，确保数据库数据保留
+            echo "注意：数据库数据将被保留"
             docker-compose down --remove-orphans || true
             
-            # 尝试获取和停止可能仍在运行的相关容器
-            RELATED_CONTAINERS=$(docker ps -a | grep evolve-file-processor | awk '{print $1}' || true)
+            # 尝试获取和停止可能仍在运行的相关容器，但不包括数据库容器
+            RELATED_CONTAINERS=$(docker ps -a | grep evolve-file-processor | grep -v "postgres" | awk '{print $1}' || true)
             if [ ! -z "$RELATED_CONTAINERS" ]; then
-              echo "发现相关容器，正在停止和移除："
+              echo "发现相关容器（不包括数据库容器），正在停止和移除："
               docker stop $RELATED_CONTAINERS || true
               docker rm $RELATED_CONTAINERS || true
             fi
@@ -213,10 +214,10 @@ jobs:
               fi
             done
             
-            # 检查是否有其他Docker容器使用该端口
-            CONTAINER_USING_PORT=$(docker ps -a | grep 5432 | awk '{print $1}' || true)
+            # 检查是否有其他Docker容器使用该端口（不包括我们自己的数据库容器）
+            CONTAINER_USING_PORT=$(docker ps -a | grep 5432 | grep -v "evolve-file-processor-db" | awk '{print $1}' || true)
             if [ ! -z "$CONTAINER_USING_PORT" ]; then
-              echo "发现容器正在使用5432端口，强制停止: $CONTAINER_USING_PORT"
+              echo "发现其他容器正在使用5432端口，强制停止: $CONTAINER_USING_PORT"
               docker stop $CONTAINER_USING_PORT || true
               docker rm $CONTAINER_USING_PORT || true
               sleep 3
@@ -270,6 +271,18 @@ jobs:
             grep -n "543[23]:5432" docker-compose.yml || echo "未找到端口配置"
             echo "数据库连接:"
             grep "DATABASE_URL" .env | sed 's/PASSWORD=.*/PASSWORD=********/g' || echo "未找到数据库连接"
+            
+            # 确保数据库数据安全
+            echo "====================================================="
+            echo "重要提示: 数据库数据将被保留，不会被删除"
+            echo "数据卷: postgres_data 将被保留"
+            echo "====================================================="
+            
+            # 6.1 确保存储目录存在并有正确的权限
+            echo "创建并设置存储目录权限..."
+            mkdir -p storage/processed storage/uploads storage/resources
+            chmod -R 777 storage
+            ls -la storage/
             
             # 7. 在本地构建Docker镜像（仅在需要时）
             if [ "$REBUILD" = true ] || ! docker image inspect evolve-file-processor:latest &>/dev/null; then
