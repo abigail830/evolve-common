@@ -1,4 +1,4 @@
-.PHONY: dev build requirements migrate test docker-build deploy-local
+.PHONY: dev build requirements migrate test docker-build deploy-local clean-requirements requirements-full setup-hooks
 
 # 默认目标
 all: help
@@ -7,12 +7,27 @@ all: help
 install:
 	poetry install --no-root
 
-# 从 pyproject.toml 生成 requirements.txt
-requirements:
+# 从 pyproject.toml 生成完整版requirements.txt(包含所有依赖)
+requirements-full:
 	poetry lock
 	poetry install --no-root
 	poetry run pip freeze > requirements.txt
-	@echo "已更新 requirements.txt"
+	@echo "已更新完整版 requirements.txt (包含所有依赖)"
+
+# 从 pyproject.toml 生成 requirements.txt (默认生成简化版)
+requirements: clean-requirements
+	@echo "已默认使用轻量级版本requirements.txt"
+
+# 生成轻量级依赖列表(无大型ML库)
+clean-requirements:
+	bash scripts/generate_requirements.sh
+	@echo "已生成轻量级 requirements.txt"
+
+# 设置Git钩子
+setup-hooks:
+	chmod +x scripts/setup-git-hooks.sh scripts/pre-commit-check.sh
+	bash scripts/setup-git-hooks.sh
+	@echo "Git钩子已设置"
 
 # 开发环境运行
 dev:
@@ -58,7 +73,10 @@ logs:
 help:
 	@echo "可用命令:"
 	@echo "  make install        - 安装开发依赖"
-	@echo "  make requirements   - 从 pyproject.toml 生成 requirements.txt"
+	@echo "  make requirements   - 从 pyproject.toml 生成简化版 requirements.txt（默认）"
+	@echo "  make clean-requirements - 生成轻量级依赖列表(无大型ML库)"
+	@echo "  make requirements-full - 从 pyproject.toml 生成完整版 requirements.txt"
+	@echo "  make setup-hooks    - 安装Git钩子以防止提交包含大型依赖的requirements.txt"
 	@echo "  make dev            - 启动开发服务器"
 	@echo "  make docker-build   - 构建 Docker 映像"
 	@echo "  make docker-dev     - 使用 docker-compose 启动本地开发环境"

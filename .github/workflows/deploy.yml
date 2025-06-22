@@ -21,6 +21,26 @@ jobs:
         with:
           fetch-depth: 0  # 获取完整代码库
       
+      - name: 设置Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: 安装依赖
+        run: |
+          pip install --upgrade pip
+          pip install poetry
+          
+      - name: 确保使用轻量级依赖
+        run: |
+          # 确保脚本可执行
+          chmod +x scripts/generate_requirements.sh
+          # 生成轻量级依赖
+          ./scripts/generate_requirements.sh
+          # 检查是否包含大型依赖
+          echo "检查是否包含大型依赖:"
+          grep -E 'torch|transformers|numpy|scipy|unstructured|easyocr' requirements.txt || echo "✓ 依赖列表已精简，未包含大型ML库"
+      
       - name: 确保.env文件不被删除并准备缓存目录
         uses: appleboy/ssh-action@master
         with:

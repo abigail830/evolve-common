@@ -141,60 +141,69 @@ poetry run uvicorn api.index:app --reload --port 8000
 
 ## 依赖管理
 
-本项目使用 `pyproject.toml` 作为主要依赖管理文件，并使用 `uv` 作为包管理工具。
+⚠️ **重要**: 本项目使用的是轻量级依赖配置，不包括大型ML库（如torch、transformers等）。
 
-### 
+### 生成依赖列表
+
+默认情况下，运行以下命令会生成轻量级的依赖列表：
 
 ```bash
-# 安装 uv
-brew install uv
-# 设置开发环境
-make setup
-# 生成 requirements.txt
 make requirements
 ```
 
-这将从 `pyproject.toml` 生成 `requirements.txt` 和 `requirements-minimal.txt` 文件，用于 Docker 构建和其他需要 requirements.txt 的场景。
+这会使用`scripts/generate_requirements.sh`脚本生成不含大型ML库的依赖清单。
 
-## 本地开发
+### 其它依赖管理命令
 
-### 启动数据库 & 运行数据库迁移
+- 生成完整版依赖（含所有依赖，不推荐用于构建Docker镜像）：
+  ```bash
+  make requirements-full
+  ```
+
+- 直接生成轻量级依赖：
+  ```bash
+  make clean-requirements
+  ```
+
+### 依赖管理原则
+
+1. 严格避免在Docker镜像中包含不必要的大型ML库
+2. 对于docling库，始终使用`--no-deps`选项安装
+3. CI/CD会强制使用轻量级依赖进行构建
+
+## 开发环境设置
+
+1. 安装依赖：
 
 ```bash
-make docker-db
+poetry install
+```
+
+2. 初始化数据库：
+
+```bash
 make migrate
 ```
 
-### 启动开发服务器 & Docker 部署
+3. 启动开发服务器：
 
 ```bash
 make dev
-# 首先生成 requirements.txt
-make requirements
-# 然后构建并启动容器
-docker-compose up -d --build
-# 检查docker服务
-docker ps | grep postgres
 ```
 
-## 部署到腾讯云
+## 部署
 
-本项目配置了GitHub Actions工作流，可以自动构建并部署到腾讯云服务器。网站将通过HTTPS协议在`file-processor.evolving.team`域名上提供服务。
+项目支持两种部署方式：
 
-### 部署配置
+1. **GitHub Actions自动部署**: 推送到`main`分支时自动在服务器上构建和部署
+2. **手动部署**: 在服务器上运行`make deploy-local`
 
-- **镜像名称**: evolve-file-processor
-- **访问地址**: https://file-processor.evolving.team
-- **反向代理**: 使用Nginx配置SSL和反向代理
-- **数据持久化**: PostgreSQL数据存储在Docker卷中
+## API文档
 
-## API 文档
+开发环境启动后，API文档可在以下地址访问：
 
-启动服务后，可以访问以下 URL 查看 API 文档：
-
-- Swagger UI: http://localhost:8000/docs (本地开发)
-- ReDoc: http://localhost:8000/redoc (本地开发)
-- 生产环境: https://file-processor.evolving.team/docs
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
 
 ---
 
