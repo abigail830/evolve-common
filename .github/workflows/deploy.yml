@@ -1,4 +1,4 @@
-name: 构建并部署到腾讯云
+name: 在服务器上构建并部署
 
 on:
   push:
@@ -7,94 +7,12 @@ on:
 
 # 定义环境变量
 env:
-  TCR_REGISTRY: ${{ secrets.TCR_REGISTRY }}
-  IMAGE_NAME: evolve-file-processor
+  APP_NAME: evolve-file-processor
   API_URL: ${{ secrets.API_URL || 'http://localhost:8000' }}
 
 jobs:
-  build-and-push:
-    name: 构建并推送镜像
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v3
-
-      - name: 设置 Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: |
-            network=host
-            image=moby/buildkit:latest
-          buildkitd-flags: "--debug"  # 添加调试信息
-
-      - name: 提取版本号
-        id: get_version
-        run: |
-          VERSION=$(grep "^version" pyproject.toml | cut -d'"' -f2)
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "提取的版本号: $VERSION"
-
-      - name: 登录腾讯容器镜像服务
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.TCR_REGISTRY }}
-          username: ${{ secrets.TCR_USERNAME }}
-          password: ${{ secrets.TCR_PASSWORD }}
-
-      # 将构建和推送分为两个步骤
-      - name: 构建Docker镜像
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: false  # 先不推送
-          load: true   # 加载到本地
-          tags: ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            VERSION=${{ env.VERSION }}
-          outputs: type=docker
-
-      # 添加多个推送步骤，每个版本单独推送
-      - name: 推送latest版本
-        run: |
-          echo "推送latest版本..."
-          docker push ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest || \
-          (echo "第一次推送失败，重试中..." && sleep 5 && docker push ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest)
-
-      - name: 标记SHA版本
-        run: |
-          docker tag ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          echo "推送SHA版本..."
-          docker push ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} || \
-          (echo "第一次推送失败，重试中..." && sleep 5 && docker push ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }})
-
-      - name: 标记版本号
-        run: |
-          docker tag ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}
-          echo "推送版本号版本..."
-          docker push ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }} || \
-          (echo "第一次推送失败，重试中..." && sleep 5 && docker push ${{ env.TCR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }})
-
-      # 添加构建后检查步骤
-      - name: 构建结果检查
-        if: always()
-        run: |
-          echo "构建结果: 完成"
-          echo "镜像信息:"
-          docker images | grep ${{ env.IMAGE_NAME }}
-
-      # 添加网络测试步骤
-      - name: 网络连接测试
-        run: |
-          echo "测试与腾讯云容器镜像服务的连接..."
-          ping -c 3 ${{ env.TCR_REGISTRY }} || true
-          curl -I https://${{ env.TCR_REGISTRY }} || true
-
-  deploy:
-    name: 部署到腾讯云服务器
-    needs: build-and-push
+  deploy-on-server:
+    name: 在腾讯云服务器上构建和部署
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -110,19 +28,36 @@ jobs:
           source: "nginx/file-processor.conf"
           target: "~/${{ secrets.CVM_USERNAME }}/evolve-file-processor"
 
-      - name: 部署到腾讯云服务器
+      - name: 在服务器上构建和部署
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.CVM_HOST }}
           username: ${{ secrets.CVM_USERNAME }}
           key: ${{ secrets.CVM_SSH_PRIVATE_KEY }}
-          command_timeout: 20m
+          command_timeout: 30m
           script: |
             set -e
+            
+            # 1. 创建项目目录并进入
             mkdir -p ~/${{ secrets.CVM_USERNAME }}/evolve-file-processor
             cd ~/${{ secrets.CVM_USERNAME }}/evolve-file-processor
             
-            # 检查.env文件是否存在
+            # 2. 初始化git仓库(如果不存在)
+            if [ ! -d ".git" ]; then
+              git init
+              git remote add origin ${{ secrets.GIT_REPO_URL }}
+              echo "Git仓库初始化完成"
+            else
+              echo "Git仓库已存在"
+            fi
+            
+            # 3. 拉取最新代码
+            git fetch origin main
+            git checkout main
+            git pull origin main
+            echo "代码已更新到最新版本"
+            
+            # 4. 检查.env文件是否存在
             if [ ! -f .env ]; then
               echo "错误: 服务器上不存在.env文件！请先创建此文件"
               exit 1
@@ -159,94 +94,27 @@ jobs:
               echo ".env配置验证完成"
             fi
             
-            # 创建docker-compose.yml文件，以最简单的方式
-            echo "version: '3'" > docker-compose.yml
-            echo "services:" >> docker-compose.yml
-            echo "  api:" >> docker-compose.yml
-            echo "    image: \${TCR_REGISTRY}/\${IMAGE_NAME}:\${IMAGE_TAG}" >> docker-compose.yml
-            echo "    ports:" >> docker-compose.yml
-            echo "      - \"8000:8000\"" >> docker-compose.yml
-            echo "    env_file: .env" >> docker-compose.yml
-            echo "    depends_on:" >> docker-compose.yml
-            echo "      - db" >> docker-compose.yml
-            echo "  db:" >> docker-compose.yml
-            echo "    image: postgres:15" >> docker-compose.yml
-            echo "    restart: unless-stopped" >> docker-compose.yml
-            echo "    ports:" >> docker-compose.yml
-            echo "      - \"5432:5432\"" >> docker-compose.yml
-            echo "    env_file: .env" >> docker-compose.yml
-            echo "    volumes:" >> docker-compose.yml
-            echo "      - postgres_data:/var/lib/postgresql/data" >> docker-compose.yml
-            echo "volumes:" >> docker-compose.yml
-            echo "  postgres_data: {}" >> docker-compose.yml
-            
-            # 确保必要的环境变量存在
-            if [ -z "${{ secrets.TCR_REGISTRY }}" ] || [ -z "${{ secrets.TCR_USERNAME }}" ] || [ -z "${{ secrets.TCR_PASSWORD }}" ]; then
-              echo "错误: 缺少容器镜像服务相关密钥"
-              exit 1
+            # 5. 确保docker-compose.yml存在
+            if [ ! -f docker-compose.yml ]; then
+              echo "警告：未找到docker-compose.yml，将使用仓库中的文件"
             fi
             
-            # 登录容器镜像服务
-            echo "${{ secrets.TCR_PASSWORD }}" | docker login ${{ secrets.TCR_REGISTRY }} -u ${{ secrets.TCR_USERNAME }} --password-stdin
+            # 6. 在本地构建Docker镜像
+            echo "在服务器上构建Docker镜像..."
+            docker build -t evolve-file-processor:latest .
             
-            # 从本地文件获取版本信息
-            if [ -f pyproject.toml ]; then
-              export VERSION=$(grep "^version" pyproject.toml | cut -d'"' -f2)
-              echo "本地pyproject.toml中的版本: $VERSION"
-            else
-              export VERSION="latest"
-              echo "警告: 未找到pyproject.toml，使用'latest'作为版本"
-            fi
-            
-            # 设置环境变量
-            export TCR_REGISTRY=${{ secrets.TCR_REGISTRY }}
-            export IMAGE_NAME=${{ env.IMAGE_NAME }}
-            export IMAGE_TAG=$VERSION
-            
-            # 设置 Docker 配置以增加超时时间和使用镜像加速
-            mkdir -p /etc/docker
-            cat > /etc/docker/daemon.json << 'EOL'
-            {
-              "registry-mirrors": ["https://mirror.ccs.tencentyun.com"],
-              "max-concurrent-downloads": 10,
-              "log-driver": "json-file",
-              "log-opts": {
-                "max-size": "100m"
-              }
-            }
-            EOL
-            
-            # 重启 Docker 以应用新配置
-            systemctl restart docker || service docker restart
-            
-            # 拉取新镜像并重启服务
-            echo "拉取新镜像..."
-            export COMPOSE_HTTP_TIMEOUT=300
-            docker-compose pull api --no-cache || true
-            
-            # 显示镜像信息
-            echo "可用镜像:"
-            docker images | grep ${IMAGE_NAME}
-            
-            # 检查是否能连接到腾讯云容器服务
-            echo "测试连接到 ${TCR_REGISTRY}..."
-            curl -k -m 10 https://${TCR_REGISTRY} || echo "无法连接到镜像仓库，但将继续尝试"
-            
-            # 停止并重启服务
-            echo "重启服务..."
+            # 7. 启动服务
+            echo "启动服务..."
+            export IMAGE_NAME=evolve-file-processor
+            export IMAGE_TAG=latest
             docker-compose down --remove-orphans || true
-            
-            # 清理可能的旧数据卷（如果有密码认证问题）
-            echo "清理旧数据卷..."
-            docker volume rm evolve-file-processor_postgres_data || true
-            
             docker-compose up -d || true
             
-            # 检查容器状态
+            # 8. 检查容器状态
             echo "查看容器状态..."
             docker-compose ps || true
             
-            # 等待数据库就绪
+            # 9. 等待数据库就绪
             echo "等待数据库就绪..."
             sleep 10
             for i in {1..12}; do
@@ -258,11 +126,11 @@ jobs:
               sleep 5
             done
             
-            # 创建Nginx配置
+            # 10. 复制Nginx配置
             echo "复制Nginx配置..."
             sudo cp -f ~/${{ secrets.CVM_USERNAME }}/evolve-file-processor/nginx/file-processor.conf /etc/nginx/conf.d/file-processor.evolving.team.conf
             
-            # 确保Certbot已安装
+            # 11. 确保Certbot已安装
             echo "检查Certbot是否安装..."
             if ! command -v certbot &> /dev/null; then
                 echo "安装Certbot..."
@@ -270,7 +138,7 @@ jobs:
                 apt-get install -y certbot python3-certbot-nginx
             fi
             
-            # 申请SSL证书
+            # 12. 申请SSL证书
             echo "申请SSL证书..."
             if [ ! -d "/etc/letsencrypt/live/file-processor.evolving.team" ]; then
                 certbot --nginx -d file-processor.evolving.team --non-interactive --agree-tos -m admin@evolving.team || echo "证书申请失败，暂时使用HTTP"
@@ -278,11 +146,11 @@ jobs:
                 echo "证书已存在"
             fi
             
-            # 检查Nginx配置并重新加载
+            # 13. 检查Nginx配置并重新加载
             echo "检查并重新加载Nginx配置..."
             nginx -t && systemctl reload nginx
             
-            # 运行数据库迁移
+            # 14. 运行数据库迁移
             echo "运行数据库迁移..."
             docker-compose exec -T api alembic upgrade head || echo "数据库迁移失败，请手动检查"
             

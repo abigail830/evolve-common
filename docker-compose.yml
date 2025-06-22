@@ -1,7 +1,7 @@
 services:
   api:
-    # 在生产环境使用TCR镜像
-    image: ${TCR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG:-latest}
+    # 使用本地构建的镜像
+    image: ${IMAGE_NAME:-evolve-file-processor}:${IMAGE_TAG:-latest}
     ports:
       - "8000:8000"
     volumes:

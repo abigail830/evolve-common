@@ -1,5 +1,5 @@
 # 构建阶段
-FROM python:3.11-slim-bullseye AS builder
+FROM python:3.11-slim AS builder
 
 # 设置工作目录
 WORKDIR /app
@@ -9,23 +9,45 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制依赖文件和源代码
-COPY requirements.txt .
+# 复制源代码
 COPY api ./api
 COPY alembic ./alembic
 COPY alembic.ini .
 
-# 创建虚拟环境并安装依赖
+# 创建虚拟环境并安装轻量级依赖
 RUN python -m venv /opt/venv && \
     /opt/venv/bin/pip install --upgrade pip wheel && \
-    # 先安装除docling以外的所有依赖
-    grep -v "^docling==" requirements.txt > other_requirements.txt && \
-    /opt/venv/bin/pip install --no-cache-dir -r other_requirements.txt && \
-    # 单独安装docling，不安装其依赖以避免torch等大型库
+    # 安装基础依赖
+    /opt/venv/bin/pip install --no-cache-dir \
+    fastapi==0.111.1 \
+    uvicorn[standard]==0.29.0 \
+    python-dotenv==1.1.0 \
+    pydantic==2.11.5 \
+    pydantic-settings==2.9.1 \
+    sqlalchemy==2.0.41 \
+    alembic==1.16.1 \
+    psycopg2-binary==2.9.10 \
+    python-multipart==0.0.7 \
+    aiofiles==0.8.0 && \
+    # 安装文档处理核心依赖
+    /opt/venv/bin/pip install --no-cache-dir \
+    docling-core==2.34.2 \
+    beautifulsoup4==4.13.4 \
+    lxml==5.4.0 \
+    pillow==11.2.1 \
+    python-docx==1.1.2 \
+    python-pptx==1.0.2 \
+    pymupdf==1.26.1 \
+    openpyxl==3.1.5 \
+    rtree==1.4.0 \
+    marko==2.1.3 \
+    requests==2.32.4 \
+    tqdm==4.67.1 && \
+    # 特殊处理docling包 - 不安装其依赖以避免torch等大型库
     /opt/venv/bin/pip install --no-cache-dir --no-deps docling==2.36.1
 
 # 最终阶段，使用更小的基础镜像
-FROM python:3.11-slim-bullseye
+FROM python:3.11-slim
 
 # 设置环境变量
 ENV PYTHONDONTWRITEBYTECODE=1
