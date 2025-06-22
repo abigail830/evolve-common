@@ -1,4 +1,4 @@
-.PHONY: dev build requirements migrate test docker-build deploy-local clean-requirements requirements-full setup-hooks
+.PHONY: dev build requirements migrate test docker-build deploy-local clean-requirements requirements-full setup-hooks free-port
 
 # 默认目标
 all: help
@@ -29,8 +29,14 @@ setup-hooks:
 	bash scripts/setup-git-hooks.sh
 	@echo "Git钩子已设置"
 
+# 释放PostgreSQL端口
+free-port:
+	@echo "尝试释放PostgreSQL端口5432..."
+	@chmod +x scripts/free-postgres-port.sh
+	@./scripts/free-postgres-port.sh
+
 # 开发环境运行
-dev:
+dev: free-port
 	uvicorn api.index:app --reload --host 0.0.0.0 --port 8000
 
 # 构建 Docker 映像
@@ -38,7 +44,7 @@ docker-build:
 	docker build -t evolve-file-processor:local .
 
 # 启动本地开发环境 (使用 docker-compose)
-docker-dev:
+docker-dev: free-port
 	docker-compose up -d
 
 # 停止本地开发环境
@@ -46,7 +52,12 @@ docker-stop:
 	docker-compose down
 
 # 在服务器上部署（本地构建）
-deploy-local:
+deploy-local: free-port
+	@echo "检查数据库连接配置..."
+	@if grep -q ":5433" .env; then \
+		echo "将数据库端口恢复为5432..."; \
+		sed -i 's/:5433/:5432/g' .env; \
+	fi
 	docker-compose down --remove-orphans || true
 	docker build -t evolve-file-processor:latest .
 	docker-compose up -d
@@ -77,6 +88,7 @@ help:
 	@echo "  make clean-requirements - 生成轻量级依赖列表(无大型ML库)"
 	@echo "  make requirements-full - 从 pyproject.toml 生成完整版 requirements.txt"
 	@echo "  make setup-hooks    - 安装Git钩子以防止提交包含大型依赖的requirements.txt"
+	@echo "  make free-port      - 释放PostgreSQL端口5432"
 	@echo "  make dev            - 启动开发服务器"
 	@echo "  make docker-build   - 构建 Docker 映像"
 	@echo "  make docker-dev     - 使用 docker-compose 启动本地开发环境"

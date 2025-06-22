@@ -195,28 +195,81 @@ jobs:
               docker rm $RELATED_CONTAINERS || true
             fi
             
-            # 检查5432端口是否被占用，如果是则尝试释放
-            PORT_PROCESS=$(sudo lsof -i :5432 | grep LISTEN | awk '{print $2}' || true)
-            if [ ! -z "$PORT_PROCESS" ]; then
-              echo "发现端口5432被进程${PORT_PROCESS}占用，尝试终止..."
-              sudo kill -9 $PORT_PROCESS || true
-              sleep 2
+            # 查找并彻底终止占用5432端口的所有进程
+            echo "查找并终止占用5432端口的所有进程..."
+            for i in {1..3}; do
+              PORT_PROCESSES=$(sudo ss -tulpn | grep ':5432' | grep LISTEN | awk '{print $7}' | sed 's/users:((".*",pid=\([0-9]*\).*/\1/g' || true)
+              if [ ! -z "$PORT_PROCESSES" ]; then
+                echo "第${i}次尝试：发现进程正在使用5432端口，进程ID: $PORT_PROCESSES"
+                for pid in $PORT_PROCESSES; do
+                  echo "终止进程: $pid"
+                  sudo kill -9 $pid || true
+                done
+                echo "等待端口释放 (5秒)..."
+                sleep 5
+              else
+                echo "没有进程占用5432端口"
+                break
+              fi
+            done
+            
+            # 检查是否有其他Docker容器使用该端口
+            CONTAINER_USING_PORT=$(docker ps -a | grep 5432 | awk '{print $1}' || true)
+            if [ ! -z "$CONTAINER_USING_PORT" ]; then
+              echo "发现容器正在使用5432端口，强制停止: $CONTAINER_USING_PORT"
+              docker stop $CONTAINER_USING_PORT || true
+              docker rm $CONTAINER_USING_PORT || true
+              sleep 3
             fi
+            
+            # 强制关闭端口 (关闭所有TCP连接)
+            echo "强制关闭所有5432端口连接..."
+            sudo ss -K dport = :5432 || true
+            sleep 2
             
             # 清理无用的网络
             docker network prune -f
             
-            # 查看端口状态
-            echo "检查端口5432状态："
-            sudo lsof -i :5432 || echo "端口5432当前空闲"
+            # 重启Docker服务以释放所有端口
+            echo "重启Docker服务以彻底释放端口..."
+            sudo systemctl restart docker || sudo service docker restart
+            sleep 5
             
-            # 修改docker-compose.yml使用不同的数据库端口（如果需要）
-            if sudo lsof -i :5432 | grep LISTEN; then
-              echo "警告：端口5432仍被占用，修改为使用5433端口"
-              sed -i 's/5432:5432/5433:5432/g' docker-compose.yml
-              # 同时更新.env中的数据库URL
-              sed -i 's/:5432/:5433/g' .env
+            # 验证端口状态
+            echo "验证端口5432状态："
+            if sudo ss -tulpn | grep ':5432' | grep LISTEN; then
+              echo "警告: 端口5432仍被占用,使用端口5433作为临时解决方案"
+              sed -i 's/"5432:5432"/"5433:5432"/g' docker-compose.yml
+              # 更新环境变量
+              if grep -q ":5432" .env; then
+                sed -i 's/:5432/:5433/g' .env
+              elif grep -q "@db/" .env; then
+                sed -i 's/@db\//@db:5433\//g' .env
+              fi
+            else
+              echo "成功: 端口5432已释放,使用标准端口"
+              # 确保docker-compose.yml使用标准端口
+              sed -i 's/"5433:5432"/"5432:5432"/g' docker-compose.yml || true
+              # 恢复环境变量
+              if grep -q ":5433" .env; then
+                sed -i 's/:5433/:5432/g' .env
+              elif grep -q "@db:5433" .env; then
+                sed -i 's/@db:5433\//@db\//g' .env
+              fi
             fi
+            
+            # 确保docker-compose.yml存在
+            if [ ! -f docker-compose.yml ]; then
+              echo "错误: docker-compose.yml不存在!"
+              exit 1
+            fi
+            
+            # 显示要使用的配置
+            echo "将使用以下配置:"
+            echo "PostgreSQL端口:"
+            grep -n "543[23]:5432" docker-compose.yml || echo "未找到端口配置"
+            echo "数据库连接:"
+            grep "DATABASE_URL" .env | sed 's/PASSWORD=.*/PASSWORD=********/g' || echo "未找到数据库连接"
             
             # 7. 在本地构建Docker镜像（仅在需要时）
             if [ "$REBUILD" = true ] || ! docker image inspect evolve-file-processor:latest &>/dev/null; then
