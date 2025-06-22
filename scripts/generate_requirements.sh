@@ -11,37 +11,50 @@ if [ ! -f "pyproject.toml" ]; then
     exit 1
 fi
 
-# 使用 poetry 生成锁文件
-echo "更新 poetry.lock..."
-poetry lock
+# 直接创建干净的requirements.txt文件
+cat > requirements.txt << 'EOL'
+# FastAPI和Web服务器依赖
+fastapi==0.111.1
+uvicorn==0.29.0
+python-multipart==0.0.7
+aiofiles==0.8.0
+pydantic==2.11.5
+pydantic-settings==2.9.1
+starlette==0.37.2
+python-dotenv==1.1.0
 
-# 创建临时环境并安装基础依赖
-echo "创建临时虚拟环境..."
-python -m venv .venv.temp
-source .venv.temp/bin/activate
+# 数据库相关依赖
+sqlalchemy==2.0.41
+alembic==1.16.1
+psycopg2-binary==2.9.10
 
-# 安装基本依赖和核心依赖，但避免安装大型ML库
-pip install --upgrade pip wheel
-echo "安装核心依赖..."
+# 基础依赖库
+anyio==4.9.0
+cffi==1.17.1
+click==8.2.1
+cryptography==45.0.4
+h11==0.16.0
+idna==3.10
+sniffio==1.3.1
+typing_extensions==4.14.0
 
-# 先安装基础依赖
-pip install fastapi uvicorn[standard] python-dotenv pydantic pydantic-settings sqlalchemy alembic psycopg2-binary python-multipart aiofiles
+# 文档处理依赖（轻量级）
+beautifulsoup4==4.13.4
+lxml==5.4.0
+pillow==11.2.1
+python-docx==1.1.2
+python-pptx==1.0.2
+pymupdf==1.26.1
+openpyxl==3.1.5
+rtree==1.4.0
+marko==2.1.3
+requests==2.32.4
+tqdm==4.67.1
 
-# 安装docling-core和其他必要的轻量级依赖
-pip install docling-core beautifulsoup4 lxml pillow python-docx python-pptx pymupdf openpyxl rtree marko requests tqdm
+# 注意：不要在这里包含docling，它将在Dockerfile中单独安装，使用--no-deps参数
+# docling==2.36.1
+# docling-core==2.34.2
+EOL
 
-# 单独安装docling，但不安装其ML依赖
-pip install --no-deps docling
-
-# 生成requirements.txt
-echo "生成requirements.txt..."
-pip freeze > requirements.txt
-
-# 清理
-echo "清理临时环境..."
-deactivate
-rm -rf .venv.temp
-
-echo "完成！requirements.txt已生成"
-echo "以下是需要额外验证的包（可能是大型依赖）:"
-grep -E 'torch|transformers|numpy|scipy|unstructured|easyocr' requirements.txt || echo "没有发现大型ML依赖！" 
+echo "✅ 完成！requirements.txt已生成"
+echo "此文件不包含大型ML依赖，docling将在构建时使用--no-deps参数单独安装" 

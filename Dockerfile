@@ -17,9 +17,14 @@ COPY requirements.txt .
 
 # 创建虚拟环境并安装轻量级依赖
 RUN python -m venv /opt/venv && \
-    /opt/venv/bin/pip install --upgrade pip wheel && \
-    # 安装基本依赖
-    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+    /opt/venv/bin/pip install --upgrade pip wheel
+
+# 先手动移除requirements.txt中可能存在的大型ML库依赖
+RUN grep -v -E "numpy|pandas|scipy|torch|transformers|easyocr|unstructured|docling" requirements.txt > requirements.clean.txt || true && \
+    # 安装基础依赖（不包括docling）
+    /opt/venv/bin/pip install --no-cache-dir -r requirements.clean.txt && \
+    # 特殊处理docling包 - 明确使用--no-deps
+    /opt/venv/bin/pip install --no-cache-dir --no-deps docling docling-core
 
 # 最终阶段，使用更小的基础镜像
 FROM python:3.11-slim
