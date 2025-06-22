@@ -14,14 +14,14 @@ jobs:
   deploy-on-server:
     name: 在腾讯云服务器上构建和部署
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40  # 增加超时时间
     steps:
       - name: 检出代码
         uses: actions/checkout@v3
         with:
           fetch-depth: 0  # 获取完整代码库
-        
-      - name: 确保.env文件不被删除
+      
+      - name: 确保.env文件不被删除并准备缓存目录
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.CVM_HOST }}
@@ -38,8 +38,20 @@ jobs:
             else
               echo "警告：未找到.env文件，请确保有一个可用的.env文件"
             fi
+            
+            # 创建Docker缓存目录
+            mkdir -p ~/docker_cache
+            
+            # 设置APT缓存
+            sudo mkdir -p /var/cache/apt/archives
+            sudo chmod 777 /var/cache/apt/archives
+            
+            # 将当前的requirements.txt复制出来（如果存在）
+            if [ -f requirements.txt ]; then
+              cp requirements.txt ~/${{ secrets.CVM_USERNAME }}/requirements.backup
+            fi
         
-      - name: 复制项目代码到服务器
+      - name: 复制项目代码到服务器(保留缓存文件)
         uses: appleboy/scp-action@master
         with:
           host: ${{ secrets.CVM_HOST }}
@@ -47,7 +59,7 @@ jobs:
           key: ${{ secrets.CVM_SSH_PRIVATE_KEY }}
           source: "./*"
           target: "~/${{ secrets.CVM_USERNAME }}/evolve-file-processor"
-          rm: true  # 删除目标目录中的旧文件，但之前已经备份了.env文件
+          rm: false  # 不删除目标目录中的文件，只覆盖
           strip_components: 0
           
       - name: 复制Nginx配置文件到服务器
@@ -71,8 +83,6 @@ jobs:
             
             # 1. 进入项目目录
             cd ~/${{ secrets.CVM_USERNAME }}/evolve-file-processor
-            echo "当前目录内容："
-            ls -la
             
             # 2. 恢复.env文件
             if [ -f ~/${{ secrets.CVM_USERNAME }}/.env.backup ]; then
@@ -80,7 +90,24 @@ jobs:
               echo ".env文件已恢复"
             fi
             
-            # 3. 检查.env文件是否存在
+            # 3. 检查是否需要重新构建
+            REBUILD=false
+            if [ -f ~/${{ secrets.CVM_USERNAME }}/requirements.backup ]; then
+              if ! diff -q ~/${{ secrets.CVM_USERNAME }}/requirements.backup requirements.txt &>/dev/null; then
+                echo "requirements.txt已更改，需要重新构建"
+                REBUILD=true
+              else
+                echo "requirements.txt未更改，尝试复用现有镜像"
+              fi
+              # 保存当前版本用于下次比较
+              cp requirements.txt ~/${{ secrets.CVM_USERNAME }}/requirements.backup
+            else
+              echo "未找到之前的requirements.backup，将进行完整构建"
+              REBUILD=true
+              cp requirements.txt ~/${{ secrets.CVM_USERNAME }}/requirements.backup
+            fi
+            
+            # 4. 检查.env文件是否存在
             if [ ! -f .env ]; then
               echo "错误: 服务器上不存在.env文件！请先创建此文件"
               exit 1
@@ -117,65 +144,92 @@ jobs:
               echo ".env配置验证完成"
             fi
             
-            # 4. 确保docker-compose.yml存在
-            if [ ! -f docker-compose.yml ]; then
-              echo "警告：未找到docker-compose.yml，将使用仓库中的文件"
+            # 5. 配置Docker设置以优化构建
+            echo "配置Docker构建优化..."
+            sudo mkdir -p /etc/docker
+            if [ ! -f /etc/docker/daemon.json ]; then
+              sudo tee /etc/docker/daemon.json > /dev/null << 'EOL'
+            {
+              "registry-mirrors": ["https://mirror.ccs.tencentyun.com"],
+              "max-concurrent-downloads": 10,
+              "log-driver": "json-file",
+              "log-opts": {
+                "max-size": "100m"
+              },
+              "storage-driver": "overlay2"
+            }
+            EOL
+              sudo systemctl restart docker || sudo service docker restart
             fi
             
-            # 5. 在本地构建Docker镜像
-            echo "在服务器上构建Docker镜像..."
-            docker build -t evolve-file-processor:latest .
+            # 6. 在本地构建Docker镜像（仅在需要时）
+            if [ "$REBUILD" = true ] || ! docker image inspect evolve-file-processor:latest &>/dev/null; then
+              echo "开始构建Docker镜像..."
+              # 使用Docker构建缓存
+              docker build --build-arg BUILDKIT_INLINE_CACHE=1 \
+                          --cache-from evolve-file-processor:latest \
+                          -t evolve-file-processor:latest .
+              echo "Docker镜像构建完成"
+            else
+              echo "复用现有Docker镜像，跳过构建步骤"
+            fi
             
-            # 6. 启动服务
+            # 7. 启动服务
             echo "启动服务..."
             export IMAGE_NAME=evolve-file-processor
             export IMAGE_TAG=latest
             docker-compose down --remove-orphans || true
-            docker-compose up -d || true
+            docker-compose up -d
             
-            # 7. 检查容器状态
+            # 8. 检查容器状态
             echo "查看容器状态..."
-            docker-compose ps || true
+            docker-compose ps
             
-            # 8. 等待数据库就绪
+            # 9. 等待数据库就绪
             echo "等待数据库就绪..."
-            sleep 10
             for i in {1..12}; do
-              if docker-compose exec -T db pg_isready -U postgres; then
+              if docker-compose exec -T db pg_isready -U postgres &>/dev/null; then
                 echo "数据库已就绪!"
                 break
               fi
               echo "等待数据库就绪... 尝试 $i/12"
               sleep 5
+              if [ $i -eq 12 ]; then
+                echo "警告：数据库启动超时，但将继续部署流程"
+              fi
             done
             
-            # 9. 复制Nginx配置
+            # 10. 复制Nginx配置
             echo "复制Nginx配置..."
-            sudo cp -f ~/${{ secrets.CVM_USERNAME }}/evolve-file-processor/nginx/file-processor.conf /etc/nginx/conf.d/file-processor.evolving.team.conf
+            sudo cp -f nginx/file-processor.conf /etc/nginx/conf.d/file-processor.evolving.team.conf || echo "警告：Nginx配置失败，可能需要手动配置"
             
-            # 10. 确保Certbot已安装
-            echo "检查Certbot是否安装..."
+            # 11. 确保Certbot已安装
             if ! command -v certbot &> /dev/null; then
                 echo "安装Certbot..."
-                apt-get update
-                apt-get install -y certbot python3-certbot-nginx
+                sudo apt-get update
+                sudo apt-get install -y certbot python3-certbot-nginx
             fi
             
-            # 11. 申请SSL证书
-            echo "申请SSL证书..."
+            # 12. 申请/更新SSL证书（如果需要）
             if [ ! -d "/etc/letsencrypt/live/file-processor.evolving.team" ]; then
-                certbot --nginx -d file-processor.evolving.team --non-interactive --agree-tos -m admin@evolving.team || echo "证书申请失败，暂时使用HTTP"
+                echo "申请新的SSL证书..."
+                sudo certbot --nginx -d file-processor.evolving.team --non-interactive --agree-tos -m admin@evolving.team || echo "证书申请失败，暂时使用HTTP"
             else
-                echo "证书已存在"
+                echo "检查证书更新..."
+                sudo certbot renew --nginx --non-interactive || echo "证书更新失败，使用现有证书"
             fi
             
-            # 12. 检查Nginx配置并重新加载
+            # 13. 检查Nginx配置并重新加载
             echo "检查并重新加载Nginx配置..."
-            nginx -t && systemctl reload nginx
+            sudo nginx -t && sudo systemctl reload nginx
             
-            # 13. 运行数据库迁移
+            # 14. 运行数据库迁移
             echo "运行数据库迁移..."
             docker-compose exec -T api alembic upgrade head || echo "数据库迁移失败，请手动检查"
+            
+            # 15. 清理不再使用的Docker镜像
+            echo "清理未使用的Docker镜像..."
+            docker image prune -f
             
             echo "部署完成!"
       
