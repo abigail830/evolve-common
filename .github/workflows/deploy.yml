@@ -311,35 +311,139 @@ jobs:
             
             # 11. 复制Nginx配置
             echo "复制Nginx配置..."
-            sudo cp -f nginx/file-processor.conf /etc/nginx/conf.d/file-processor.evolving.team.conf || echo "警告：Nginx配置失败，可能需要手动配置"
+            
+            # 检查Nginx是否已安装
+            if ! command -v nginx &> /dev/null; then
+                echo "Nginx未安装，正在安装..."
+                sudo apt-get update
+                sudo apt-get install -y nginx
+                echo "Nginx已安装"
+            else
+                echo "Nginx已存在"
+            fi
+            
+            # 查找Nginx配置目录
+            echo "查找Nginx配置目录..."
+            if [ -d "/etc/nginx/conf.d" ]; then
+                NGINX_CONF_DIR="/etc/nginx/conf.d"
+                echo "找到标准配置目录: $NGINX_CONF_DIR"
+            elif [ -d "/etc/nginx/sites-available" ]; then
+                NGINX_CONF_DIR="/etc/nginx/sites-available"
+                echo "找到Ubuntu配置目录: $NGINX_CONF_DIR"
+            else
+                # 如果找不到标准目录，创建一个
+                NGINX_CONF_DIR="/etc/nginx/conf.d"
+                echo "未找到标准配置目录，创建: $NGINX_CONF_DIR"
+                sudo mkdir -p $NGINX_CONF_DIR
+            fi
+            
+            # 复制配置文件
+            echo "复制配置到: $NGINX_CONF_DIR/file-processor.evolving.team.conf"
+            sudo cp -f nginx/file-processor.conf $NGINX_CONF_DIR/file-processor.evolving.team.conf
+            
+            # 如果是sites-available目录，创建符号链接到sites-enabled
+            if [ "$NGINX_CONF_DIR" = "/etc/nginx/sites-available" ]; then
+                echo "创建符号链接到sites-enabled目录..."
+                sudo ln -sf $NGINX_CONF_DIR/file-processor.evolving.team.conf /etc/nginx/sites-enabled/
+            fi
+            
+            # 显示配置文件内容
+            echo "Nginx配置文件内容:"
+            sudo cat $NGINX_CONF_DIR/file-processor.evolving.team.conf
             
             # 12. 确保Certbot已安装
             if ! command -v certbot &> /dev/null; then
                 echo "安装Certbot..."
                 sudo apt-get update
                 sudo apt-get install -y certbot python3-certbot-nginx
+                
+                # 验证安装是否成功
+                if ! command -v certbot &> /dev/null; then
+                    echo "警告: Certbot安装失败，将跳过SSL证书配置"
+                else
+                    echo "Certbot安装成功"
+                fi
             fi
             
             # 13. 申请/更新SSL证书（如果需要）
-            if [ ! -d "/etc/letsencrypt/live/file-processor.evolving.team" ]; then
-                echo "申请新的SSL证书..."
-                sudo certbot --nginx -d file-processor.evolving.team --non-interactive --agree-tos -m admin@evolving.team || echo "证书申请失败，暂时使用HTTP"
+            if command -v certbot &> /dev/null; then
+                if [ ! -d "/etc/letsencrypt/live/file-processor.evolving.team" ]; then
+                    echo "申请新的SSL证书..."
+                    sudo certbot --nginx -d file-processor.evolving.team --non-interactive --agree-tos -m admin@evolving.team || echo "证书申请失败，暂时使用HTTP"
+                else
+                    echo "检查证书更新..."
+                    sudo certbot renew --nginx --non-interactive || echo "证书更新失败，使用现有证书"
+                fi
             else
-                echo "检查证书更新..."
-                sudo certbot renew --nginx --non-interactive || echo "证书更新失败，使用现有证书"
+                echo "跳过SSL证书配置，因为Certbot未安装"
             fi
             
             # 14. 检查Nginx配置并重新加载
-            echo "检查并重新加载Nginx配置..."
-            sudo nginx -t && sudo systemctl reload nginx
+            if command -v nginx &> /dev/null; then
+                echo "检查并重新加载Nginx配置..."
+                # 显示Nginx配置信息
+                echo "当前Nginx配置文件位置:"
+                sudo find /etc/nginx -type f -name "*.conf" | sort
+                
+                # 检查FastAPI应用状态
+                echo "检查FastAPI应用状态..."
+                docker ps
+                docker logs evolve-file-processor-api-1 --tail 20 || echo "无法获取API容器日志"
+                
+                # 检查网络连接
+                echo "检查网络连接..."
+                docker exec evolve-file-processor-api-1 curl -v http://localhost:8000/health || echo "无法从容器内部访问API"
+                curl -v http://localhost:8000/health || echo "无法从主机访问API"
+                
+                # 检查Nginx配置
+                if sudo nginx -t; then
+                    sudo systemctl reload nginx || sudo service nginx reload
+                    echo "Nginx配置已重新加载"
+                    
+                    # 显示实际使用的配置
+                    echo "Nginx实际使用的配置:"
+                    sudo nginx -T | grep -A 20 "file-processor"
+                else
+                    echo "警告: Nginx配置测试失败，创建简单的默认配置"
+                    # 创建一个简单的默认配置，使用单行命令
+                    echo 'server { listen 80; server_name file-processor.evolving.team; location / { proxy_pass http://localhost:8000; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; } }' | sudo tee /tmp/default.conf > /dev/null
+                    
+                    # 使用之前找到的配置目录
+                    if [ -z "$NGINX_CONF_DIR" ]; then
+                        # 如果变量未定义，使用默认目录
+                        NGINX_CONF_DIR="/etc/nginx/conf.d"
+                        sudo mkdir -p $NGINX_CONF_DIR
+                    fi
+                    
+                    sudo mv /tmp/default.conf $NGINX_CONF_DIR/file-processor.evolving.team.conf
+                    
+                    # 如果是sites-available目录，创建符号链接到sites-enabled
+                    if [ "$NGINX_CONF_DIR" = "/etc/nginx/sites-available" ]; then
+                        echo "创建符号链接到sites-enabled目录..."
+                        sudo ln -sf $NGINX_CONF_DIR/file-processor.evolving.team.conf /etc/nginx/sites-enabled/
+                    fi
+                    
+                    sudo nginx -t && sudo systemctl reload nginx || echo "无法使用默认配置"
+                fi
+            else
+                echo "跳过Nginx配置，因为Nginx未安装"
+            fi
             
             # 15. 运行数据库迁移
             echo "运行数据库迁移..."
-            docker-compose exec -T api alembic upgrade head || echo "数据库迁移失败，请手动检查"
+            docker-compose exec -T api alembic upgrade head || echo "数据库迁移失败，请检查日志"
             
             # 16. 清理不再使用的Docker镜像
             echo "清理未使用的Docker镜像..."
-            docker image prune -f
+            docker system prune -f
+            
+            # 17. 复制并执行调试脚本
+            echo "复制并执行调试脚本..."
+            cp -f scripts/debug-nginx.sh /tmp/debug-nginx.sh
+            chmod +x /tmp/debug-nginx.sh
+            sudo /tmp/debug-nginx.sh > nginx-debug.log 2>&1
+            echo "调试日志已保存到 nginx-debug.log"
+            cat nginx-debug.log
             
             echo "部署完成!"
       
