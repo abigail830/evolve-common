@@ -182,7 +182,43 @@ jobs:
               sudo systemctl restart docker || sudo service docker restart
             fi
             
-            # 6. 在本地构建Docker镜像（仅在需要时）
+            # 6. 停止并清理所有相关容器、网络和卷
+            echo "停止并清理之前的容器和相关资源..."
+            # 先停止所有容器
+            docker-compose down --remove-orphans || true
+            
+            # 尝试获取和停止可能仍在运行的相关容器
+            RELATED_CONTAINERS=$(docker ps -a | grep evolve-file-processor | awk '{print $1}' || true)
+            if [ ! -z "$RELATED_CONTAINERS" ]; then
+              echo "发现相关容器，正在停止和移除："
+              docker stop $RELATED_CONTAINERS || true
+              docker rm $RELATED_CONTAINERS || true
+            fi
+            
+            # 检查5432端口是否被占用，如果是则尝试释放
+            PORT_PROCESS=$(sudo lsof -i :5432 | grep LISTEN | awk '{print $2}' || true)
+            if [ ! -z "$PORT_PROCESS" ]; then
+              echo "发现端口5432被进程${PORT_PROCESS}占用，尝试终止..."
+              sudo kill -9 $PORT_PROCESS || true
+              sleep 2
+            fi
+            
+            # 清理无用的网络
+            docker network prune -f
+            
+            # 查看端口状态
+            echo "检查端口5432状态："
+            sudo lsof -i :5432 || echo "端口5432当前空闲"
+            
+            # 修改docker-compose.yml使用不同的数据库端口（如果需要）
+            if sudo lsof -i :5432 | grep LISTEN; then
+              echo "警告：端口5432仍被占用，修改为使用5433端口"
+              sed -i 's/5432:5432/5433:5432/g' docker-compose.yml
+              # 同时更新.env中的数据库URL
+              sed -i 's/:5432/:5433/g' .env
+            fi
+            
+            # 7. 在本地构建Docker镜像（仅在需要时）
             if [ "$REBUILD" = true ] || ! docker image inspect evolve-file-processor:latest &>/dev/null; then
               echo "开始构建Docker镜像..."
               # 使用Docker构建缓存
@@ -194,18 +230,19 @@ jobs:
               echo "复用现有Docker镜像，跳过构建步骤"
             fi
             
-            # 7. 启动服务
+            # 8. 启动服务
             echo "启动服务..."
             export IMAGE_NAME=evolve-file-processor
             export IMAGE_TAG=latest
-            docker-compose down --remove-orphans || true
-            docker-compose up -d
             
-            # 8. 检查容器状态
+            # 使用--force-recreate确保容器被重新创建
+            docker-compose up -d --force-recreate
+            
+            # 9. 检查容器状态
             echo "查看容器状态..."
             docker-compose ps
             
-            # 9. 等待数据库就绪
+            # 10. 等待数据库就绪
             echo "等待数据库就绪..."
             for i in {1..12}; do
               if docker-compose exec -T db pg_isready -U postgres &>/dev/null; then
@@ -219,18 +256,18 @@ jobs:
               fi
             done
             
-            # 10. 复制Nginx配置
+            # 11. 复制Nginx配置
             echo "复制Nginx配置..."
             sudo cp -f nginx/file-processor.conf /etc/nginx/conf.d/file-processor.evolving.team.conf || echo "警告：Nginx配置失败，可能需要手动配置"
             
-            # 11. 确保Certbot已安装
+            # 12. 确保Certbot已安装
             if ! command -v certbot &> /dev/null; then
                 echo "安装Certbot..."
                 sudo apt-get update
                 sudo apt-get install -y certbot python3-certbot-nginx
             fi
             
-            # 12. 申请/更新SSL证书（如果需要）
+            # 13. 申请/更新SSL证书（如果需要）
             if [ ! -d "/etc/letsencrypt/live/file-processor.evolving.team" ]; then
                 echo "申请新的SSL证书..."
                 sudo certbot --nginx -d file-processor.evolving.team --non-interactive --agree-tos -m admin@evolving.team || echo "证书申请失败，暂时使用HTTP"
@@ -239,15 +276,15 @@ jobs:
                 sudo certbot renew --nginx --non-interactive || echo "证书更新失败，使用现有证书"
             fi
             
-            # 13. 检查Nginx配置并重新加载
+            # 14. 检查Nginx配置并重新加载
             echo "检查并重新加载Nginx配置..."
             sudo nginx -t && sudo systemctl reload nginx
             
-            # 14. 运行数据库迁移
+            # 15. 运行数据库迁移
             echo "运行数据库迁移..."
             docker-compose exec -T api alembic upgrade head || echo "数据库迁移失败，请手动检查"
             
-            # 15. 清理不再使用的Docker镜像
+            # 16. 清理不再使用的Docker镜像
             echo "清理未使用的Docker镜像..."
             docker image prune -f
             

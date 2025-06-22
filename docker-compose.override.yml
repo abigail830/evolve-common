@@ -10,4 +10,9 @@ services:
     command: python -m uvicorn api.index:app --host 0.0.0.0 --port 8000 --reload
     environment:
       - ENVIRONMENT=development
-      - DEBUG=true 
+      - DEBUG=true
+  
+  db:
+    # 本地开发环境使用不同的端口，避免端口冲突
+    ports:
+      - "5433:5432" 
