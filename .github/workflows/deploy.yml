@@ -18,7 +18,38 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # 获取完整代码库
         
+      - name: 确保.env文件不被删除
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.CVM_HOST }}
+          username: ${{ secrets.CVM_USERNAME }}
+          key: ${{ secrets.CVM_SSH_PRIVATE_KEY }}
+          script: |
+            mkdir -p ~/${{ secrets.CVM_USERNAME }}/evolve-file-processor
+            cd ~/${{ secrets.CVM_USERNAME }}/evolve-file-processor
+            
+            # 备份.env文件（如果存在）
+            if [ -f .env ]; then
+              cp .env ~/${{ secrets.CVM_USERNAME }}/.env.backup
+              echo ".env文件已备份"
+            else
+              echo "警告：未找到.env文件，请确保有一个可用的.env文件"
+            fi
+        
+      - name: 复制项目代码到服务器
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.CVM_HOST }}
+          username: ${{ secrets.CVM_USERNAME }}
+          key: ${{ secrets.CVM_SSH_PRIVATE_KEY }}
+          source: "./*"
+          target: "~/${{ secrets.CVM_USERNAME }}/evolve-file-processor"
+          rm: true  # 删除目标目录中的旧文件，但之前已经备份了.env文件
+          strip_components: 0
+          
       - name: 复制Nginx配置文件到服务器
         uses: appleboy/scp-action@master
         with:
@@ -38,26 +69,18 @@ jobs:
           script: |
             set -e
             
-            # 1. 创建项目目录并进入
-            mkdir -p ~/${{ secrets.CVM_USERNAME }}/evolve-file-processor
+            # 1. 进入项目目录
             cd ~/${{ secrets.CVM_USERNAME }}/evolve-file-processor
+            echo "当前目录内容："
+            ls -la
             
-            # 2. 初始化git仓库(如果不存在)
-            if [ ! -d ".git" ]; then
-              git init
-              git remote add origin ${{ secrets.GIT_REPO_URL }}
-              echo "Git仓库初始化完成"
-            else
-              echo "Git仓库已存在"
+            # 2. 恢复.env文件
+            if [ -f ~/${{ secrets.CVM_USERNAME }}/.env.backup ]; then
+              cp ~/${{ secrets.CVM_USERNAME }}/.env.backup .env
+              echo ".env文件已恢复"
             fi
             
-            # 3. 拉取最新代码
-            git fetch origin main
-            git checkout main
-            git pull origin main
-            echo "代码已更新到最新版本"
-            
-            # 4. 检查.env文件是否存在
+            # 3. 检查.env文件是否存在
             if [ ! -f .env ]; then
               echo "错误: 服务器上不存在.env文件！请先创建此文件"
               exit 1
@@ -94,27 +117,27 @@ jobs:
               echo ".env配置验证完成"
             fi
             
-            # 5. 确保docker-compose.yml存在
+            # 4. 确保docker-compose.yml存在
             if [ ! -f docker-compose.yml ]; then
               echo "警告：未找到docker-compose.yml，将使用仓库中的文件"
             fi
             
-            # 6. 在本地构建Docker镜像
+            # 5. 在本地构建Docker镜像
             echo "在服务器上构建Docker镜像..."
             docker build -t evolve-file-processor:latest .
             
-            # 7. 启动服务
+            # 6. 启动服务
             echo "启动服务..."
             export IMAGE_NAME=evolve-file-processor
             export IMAGE_TAG=latest
             docker-compose down --remove-orphans || true
             docker-compose up -d || true
             
-            # 8. 检查容器状态
+            # 7. 检查容器状态
             echo "查看容器状态..."
             docker-compose ps || true
             
-            # 9. 等待数据库就绪
+            # 8. 等待数据库就绪
             echo "等待数据库就绪..."
             sleep 10
             for i in {1..12}; do
@@ -126,11 +149,11 @@ jobs:
               sleep 5
             done
             
-            # 10. 复制Nginx配置
+            # 9. 复制Nginx配置
             echo "复制Nginx配置..."
             sudo cp -f ~/${{ secrets.CVM_USERNAME }}/evolve-file-processor/nginx/file-processor.conf /etc/nginx/conf.d/file-processor.evolving.team.conf
             
-            # 11. 确保Certbot已安装
+            # 10. 确保Certbot已安装
             echo "检查Certbot是否安装..."
             if ! command -v certbot &> /dev/null; then
                 echo "安装Certbot..."
@@ -138,7 +161,7 @@ jobs:
                 apt-get install -y certbot python3-certbot-nginx
             fi
             
-            # 12. 申请SSL证书
+            # 11. 申请SSL证书
             echo "申请SSL证书..."
             if [ ! -d "/etc/letsencrypt/live/file-processor.evolving.team" ]; then
                 certbot --nginx -d file-processor.evolving.team --non-interactive --agree-tos -m admin@evolving.team || echo "证书申请失败，暂时使用HTTP"
@@ -146,11 +169,11 @@ jobs:
                 echo "证书已存在"
             fi
             
-            # 13. 检查Nginx配置并重新加载
+            # 12. 检查Nginx配置并重新加载
             echo "检查并重新加载Nginx配置..."
             nginx -t && systemctl reload nginx
             
-            # 14. 运行数据库迁移
+            # 13. 运行数据库迁移
             echo "运行数据库迁移..."
             docker-compose exec -T api alembic upgrade head || echo "数据库迁移失败，请手动检查"
             
