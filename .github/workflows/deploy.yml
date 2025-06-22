@@ -337,6 +337,22 @@ jobs:
                 sudo mkdir -p $NGINX_CONF_DIR
             fi
             
+            # 清理所有可能冲突的配置
+            echo "清理可能冲突的Nginx配置..."
+            sudo find /etc/nginx -type f -name "*.conf" | grep -i "file-processor\|default" | xargs -I{} echo "检查配置文件: {}"
+            sudo find /etc/nginx -type f -name "*.conf" | grep -i "file-processor" | xargs -I{} sudo rm -f {}
+            
+            # 如果存在sites-enabled目录，也清理那里的链接
+            if [ -d "/etc/nginx/sites-enabled" ]; then
+                echo "清理sites-enabled目录中的冲突配置..."
+                sudo find /etc/nginx/sites-enabled -type l -name "*file-processor*" -delete
+                # 检查默认站点是否存在并禁用
+                if [ -f "/etc/nginx/sites-enabled/default" ]; then
+                    echo "禁用默认站点配置..."
+                    sudo rm -f /etc/nginx/sites-enabled/default
+                fi
+            fi
+            
             # 复制配置文件
             echo "复制配置到: $NGINX_CONF_DIR/file-processor.evolving.team.conf"
             sudo cp -f nginx/file-processor.conf $NGINX_CONF_DIR/file-processor.evolving.team.conf
@@ -442,8 +458,23 @@ jobs:
             cp -f scripts/debug-nginx.sh /tmp/debug-nginx.sh
             chmod +x /tmp/debug-nginx.sh
             sudo /tmp/debug-nginx.sh > nginx-debug.log 2>&1
-            echo "调试日志已保存到 nginx-debug.log"
-            cat nginx-debug.log
+            echo "Nginx调试日志已保存到 nginx-debug.log"
+            
+            # 18. 执行Docker网络调试
+            echo "执行Docker网络调试..."
+            cp -f scripts/debug-docker.sh /tmp/debug-docker.sh
+            chmod +x /tmp/debug-docker.sh
+            sudo /tmp/debug-docker.sh > docker-debug.log 2>&1
+            echo "Docker网络调试日志已保存到 docker-debug.log"
+            
+            # 19. 显示调试摘要
+            echo "调试摘要:"
+            echo "1. 检查API容器健康状态..."
+            docker inspect evolve-file-processor-api-1 -f '{{.State.Health.Status}}' || echo "API容器健康状态不可用"
+            echo "2. 检查API容器日志最后5行..."
+            docker logs evolve-file-processor-api-1 --tail 5 || echo "无法获取API容器日志"
+            echo "3. 检查Nginx配置..."
+            sudo nginx -t
             
             echo "部署完成!"
       
