@@ -19,10 +19,29 @@ COPY requirements.txt .
 RUN python -m venv /opt/venv && \
     /opt/venv/bin/pip install --upgrade pip wheel
 
-# 先手动移除requirements.txt中可能存在的大型ML库依赖
-RUN grep -v -E "numpy|pandas|scipy|torch|transformers|easyocr|unstructured|docling" requirements.txt > requirements.clean.txt || true && \
-    # 安装基础依赖（不包括docling）
-    /opt/venv/bin/pip install --no-cache-dir -r requirements.clean.txt && \
+# 直接安装必要的依赖，避免版本问题
+RUN /opt/venv/bin/pip install --no-cache-dir \
+    fastapi==0.111.1 \
+    uvicorn==0.29.0 \
+    python-multipart==0.0.7 \
+    aiofiles==0.8.0 \
+    pydantic==2.11.5 \
+    pydantic-settings==2.9.1 \
+    sqlalchemy==1.4.50 \
+    alembic==1.16.1 \
+    psycopg2-binary==2.9.10 \
+    beautifulsoup4==4.13.4 \
+    lxml==5.4.0 \
+    pillow==11.2.1 \
+    python-docx==1.1.2 \
+    python-pptx==1.0.2 \
+    pymupdf==1.26.1 \
+    openpyxl==3.1.5 \
+    rtree==1.4.0 \
+    marko==2.1.3 \
+    requests==2.32.4 \
+    tqdm==4.67.1 \
+    python-dotenv==1.1.0 && \
     # 特殊处理docling包 - 明确使用--no-deps
     /opt/venv/bin/pip install --no-cache-dir --no-deps docling docling-core
 

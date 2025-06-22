@@ -24,7 +24,7 @@ starlette==0.37.2
 python-dotenv==1.1.0
 
 # 数据库相关依赖
-sqlalchemy==2.0.41
+sqlalchemy==1.4.50  # 降级版本，因为2.0.41在某些环境中不可用
 alembic==1.16.1
 psycopg2-binary==2.9.10
 
